@@ -566,55 +566,81 @@ class MultiViewCapture:
         ...
 ```
 
-### 8.3 V5B3 — crack_annotator 标注工具
+### 8.3 V5B3 — crack_annotator 标注工具 ✅ 已填实（2026-08-25）
 
 ```python
-# tools/crack_annotator.py
-class CrackAnnotator:
-    """
-    Streamlit + OpenCV 标注工具
-    - 多视图同步标注
-    - 标注一致性检查（多人标注 IoU）
-    - 导出 COCO 格式 + 自定义 JSON
-    """
-    def annotate(self, image_path: str) -> dict:
-        """
-        Returns:
-            {
-                "ceramic_id": str,
-                "view": "front" | "back" | "top",
-                "bbox": [x1, y1, x2, y2],
-                "keypoints": [(y, x), ...],  # 8-16 个有序点
-                "timestamp": str,
-                "annotator": str,
-            }
-        """
-        ...
+# tools/crack_annotator.py（V5B3 已实现 ~680 行）
+# 注：v5-α 当前环境未装 streamlit，用 matplotlib 替代（覆盖标注需求）
+
+from tools.crack_annotator import (
+    auto_extract_crack,        # 自动骨架提取（Canny + 形态学 + skeletonize）
+    save_annotation,            # JSON 序列化（含 image_size/bbox/keypoints/method）
+    load_annotation,            # JSON 反序列化
+    CrackAnnotatorGUI,          # matplotlib 鼠标交互（左键添加/右键删除/'a'自动/'s'保存）
+    batch_auto_extract,         # CLI 批处理（无需 GUI）
+)
+
+# 用法 1：自动骨架提取（v5-α 默认）
+result = auto_extract_crack(image, min_keypoints=8, max_keypoints=16, verbose=True)
+# 返回：{"keypoints": (K, 2), "bbox": (4,), "skeleton": (H, W) bool}
+
+# 用法 2：JSON 持久化
+path = save_annotation(
+    image_path="img.png",
+    keypoints=result["keypoints"],
+    bbox=result["bbox"],
+    ceramic_id="cart03_layer2",
+    skeleton_method="canny_skeletonize",  # 或 "manual"
+)
+ann = load_annotation(path)
+# ann["crack_keypoints"] → np.ndarray (K, 2)
+
+# 用法 3：交互式 GUI
+gui = CrackAnnotatorGUI(
+    image_path="img.png", ceramic_id="cart03_layer2",
+    min_keypoints=8, max_keypoints=16,
+)
+gui.run()
+
+# CLI 三模式
+# $ python tools/crack_annotator.py gui --image img.png --ceramic-id cart03
+# $ python tools/crack_annotator.py batch --input-dir data/raw/ --output-dir data/ann/
+# $ python tools/crack_annotator.py validate path/to/annotation.json
 ```
 
-### 8.4 V5B4 — 位置图像 L0/L1 完整管线
+### 8.4 V5B4 — 位置图像 L0/L1 完整管线 ✅ 已填实（2026-08-25）
 
 ```python
-# data/position_extractor.py（v5-α 占位 → v5-β 实现）
-class PositionExtractor:
-    """
-    L0: 多角度 + 标定物 → 6D pose
-    L1: 单张 + 窑体可见 → 6D pose
-    L2: 仅陶瓷 → 1D 计数
-    L3: 元数据 → 6D 默认值
-    L4: 无 → mask
-    """
-    def extract(
-        self,
-        images: list[np.ndarray],    # 多角度 RGB（≥ 1 张）
-        metadata: dict,             # {cart_id, layer_idx, kiln_params, ...}
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Returns:
-            pose_6d: (6,) [x, y, z, roll, pitch, yaw]
-            mask: (6,) bool（哪些维度有效）
-        """
-        ...
+# data/position_extractor.py（V5B4 已实现 ~410 行）
+from data.position_extractor import (
+    PositionExtractor, PositionInfo,
+    extract_L0, extract_L1, extract_L2, extract_L3, extract_L4,
+)
+
+# 5 级降级接口
+p_info = PositionExtractor(
+    mode="auto",                       # auto / L0 / L1 / L2 / L3 / L4
+    images=multi_view_images,          # L0/L1 用（list of np.ndarray H×W×3 uint8）
+    checkerboard_inner_corners=(7, 9), # L0 标定板
+    square_size_mm=25.0,               # L0 单格尺寸
+    kiln_corners=[(x1,y1), ...],       # L0/L1 窑体框
+    kiln_visible=True,                 # L1
+    ceramic_count=3,                   # L2
+    cart_id="cart03", layer_idx=2,     # L3
+    n_layers=5,                        # L3
+    kiln_layout=None,                  # L3（None → DEFAULT_KILN_LAYOUT）
+).extract()
+
+# p_info.level → "L0"/"L1"/"L2"/"L3"/"L4"
+# p_info.position_6d → torch.Tensor (6,) [tx, ty, tz, rx, ry, rz]
+# p_info.validity_mask → torch.Tensor (6,) True = 该维度有真实数据
+# p_info.source_meta → dict 输入数据来源
+# p_info.to(device) → 迁移到 GPU
+
+# 单独调用（更灵活）
+pos_l3 = extract_L3(cart_id=3, layer_idx=2)  # 完整实现
+pos_l4 = extract_L4()                          # 全 0
+# extract_L0() / extract_L1() → cv2 缺失时降级到 L3（v5-α stub）
 ```
 
 ### 8.5 V5B5 — 3D FEM 仿真（可选）
@@ -651,44 +677,64 @@ class FEM3DSimulator:
         ...
 ```
 
-### 8.6 V5B6 — 磁盘缓存
+### 8.6 V5B6 — 磁盘缓存 ✅ 已填实（2026-08-25，npz 实现）
 
 ```python
-# data/patch_dataset_v5.py（V5B6 改造）
-class PatchDatasetV5:
-    def __init__(
-        self,
-        data_source: str = "simulation",   # v5-α 默认 / v5-β "real_3d"
-        cache_dir: str = "data/cache",     # v5-β 新增
-        hdf5_filename: str | None = None,  # v5-β 新增
-        precompute: bool = True,           # v5-α：内存预计算 / v5-β：磁盘预计算
-    ):
-        ...
+# data/patch_dataset_v5.py（V5B6 已集成，npz 而非 h5py）
+from data.patch_dataset_v5 import PatchDatasetV5, collate_v5
+
+# v5-α 用法不变
+ds = PatchDatasetV5(patch_size=256, n_samples=100, ...)
+
+# v5-β 加 cache_dir + use_position_image
+ds = PatchDatasetV5(
+    patch_size=256,
+    n_samples=100,
+    data_source="simulation",          # v5-α 默认；v5-β 改 "real"
+    use_position_image=True,           # 注入 true_position_6d 字段
+    cache_dir="logs/v5b6_cache",       # npz 缓存目录
+)
+# 缓存文件名：sim_cache_p{patch_size}_n{n_samples}_s{seed}_t{thermal_hash}_th{threshold}.npz
+# 缓存内容：x_1d / x_2d / true_bbox / true_keypoints / keypoint_mask /
+#           true_crack_pixels / pixel_mask / true_position_6d
+
+# collate_v5 仅当所有样本都含 position_6d 时输出
+batch = collate_v5([ds[i] for i in range(B)])
+batch.get("true_position_6d")  # → (B, 6) 或 None
+
+# 注：h5py 未装，用 npz 等效（单文件 vs 切片访问略慢）
 ```
 
-### 8.7 V5B7 — team_train_v5.py
+### 8.7 V5B7 — team_train_v5.py ✅ 已填实（2026-08-25）
 
 详见 [团队协作训练指南.md §四](团队协作训练指南.md)。
 
 ```python
-# team_train_v5.py（v5-β 新建）
-def load_tasks_from_files_v5() -> list:
-    """从 tasks/team_v5_beta.json 加载所有任务（顶层数组）"""
+# team_train_v5.py（V5B7 已实现 ~720 行，从 v4 team_train.py 移植 + v5-α 适配）
+# CLI 入口：
+#   python team_train_v5.py --list-tasks  # 列出 V5A*/V5B* 任务
+#   python team_train_v5.py              # 交互式菜单
+#   python team_train_v5.py --auto       # 自动执行
+#   python team_train_v5.py --import     # 导入队友检查点
 
-def merge_tasks_v5(external, defaults) -> list:
-    """合并外部 JSON 与内置 V5B1-V5B8"""
+import team_train_v5
 
-def run_training_task_v5(task_id: str) -> bool:
-    """执行单个训练任务（subprocess 调 run_train_v5.py）"""
+# 关键函数（继承自 v4）
+all_tasks = team_train_v5.load_tasks_from_files()  # 仅 V5* 前缀
+hardware_level, total_mem = team_train_v5.get_hardware_level()
+completed = team_train_v5.get_completed_tasks()
 
-def get_completed_tasks_v5() -> set:
-    """返回已完成任务的 ID 集合（按 best.pt 扫描）"""
-
-def import_checkpoint_v5() -> None:
-    """交互式导入队友的 .pt 检查点"""
-
-def get_hardware_level_v5() -> tuple[str, float]:
-    """返回 ('L1'/'L2'/'L3', total_mem_gb)"""
+# 内置任务路由
+module_map = team_train_v5._V5_MODULE_TEST_MAP
+# {"simulator": ("tests/test_patch_simulator_v5.py",),
+#  "heads": ("tests/test_spline_head.py", "tests/test_gp_module.py"),
+#  "loss": ("tests/test_ordered_kp_loss.py",),
+#  "backbones": ("tests/test_pe_tsnet_v5.py",),
+#  "trainer": ("tests/test_trainer_v5_smoke.py",),
+#  "annotator": ("tools/crack_annotator.py",),
+#  "position": ("data/position_extractor.py",),
+#  "cache": ("data/patch_dataset_v5.py",),
+#  "team": (None,)}
 ```
 
 ### 8.8 V5B8 — Streamlit v5 推理 GUI
@@ -730,20 +776,26 @@ class PETSNetMultimodalV5Beta(nn.Module):
 
 | v5-α API | v5-β 状态 | 备注 |
 |----------|-----------|------|
-| `create_v5_model(variant)` | ✅ 兼容 + 新增 `data_source` 参数 | |
-| `PatchSimulator.simulate()` | ✅ 保留 | v5-β 可选换 `FEM3DSimulator` |
-| `PatchDatasetV5` | ✅ 兼容 + 新增 `data_source`/`cache_dir` 参数 | |
-| `collate_v5` | ✅ 兼容 + 新增 `position_6d` 字段 | |
-| `TrainerV5` | ✅ 兼容 + 新增 `use_position_image`/`use_uv_inverse` 参数 | |
-| `OrderedKeypointLoss` | ✅ 兼容 + 新增 `uv_projection_loss` | |
-| `SplineHead` | ✅ 兼容 | v5-β 加 UV 逆映射头 |
+| `create_v5_model(variant)` | ✅ 兼容 | v5-β 可加 `use_position_image` 等 kwargs |
+| `PatchSimulator.simulate()` | ✅ 保留 | v5-β 可选换 `FEM3DSimulator`（V5B5）|
+| `PatchDatasetV5` | ✅ 兼容 + 新增 `data_source`/`cache_dir`/`use_position_image` | V5B6 已实现 |
+| `collate_v5` | ✅ 兼容 + 新增 `true_position_6d` 字段（条件输出）| 已实现 |
+| `TrainerV5` | ✅ 兼容 + 6 个 V5-β 钩子 | 已实现 |
+| `OrderedKeypointLoss` | ✅ 兼容 + 新增 `position_6d_loss`/`uv_projection_loss` | 已实现 |
+| `SplineHead` | ✅ 兼容 | v5-β 加 UV 逆映射头（V5B1）|
 | `GPModule` | ⚠️ 改进 | v5-β 改用 running stats（修复 V5-014/015）|
-| `run_train_v5.py` | ✅ 兼容 + 新增 v5-β CLI 参数 | |
+| `run_train_v5.py` | ✅ 兼容 | v5-β 加 V5-β CLI 参数（use_position_image 等）|
+| `team_train_v5.py`（V5B7）| ✅ **新增**（V5B7 已填实）| 从 v4 `team_train.py` 移植 + v5-α 适配 |
+| `crack_annotator`（V5B3）| ✅ **新增**（V5B3 已填实）| GUI + CLI batch + 校验 3 模式 |
+| `position_extractor`（V5B4）| ✅ **新增**（V5B4 已填实）| 5 级降级 + auto 模式 |
 
 ---
 
 ## §9. 文档历史
 
 - **2026-08-12（V5A5）**：fork 自 v4.6.11 同名文档，§0 加 v5-α 标注
-- **2026-08-24（本次 1）**：完全废弃 v4 内容（`train_model` / `evaluate_model` / `team_train.py` / `freeze_model_backbone` 等），改为 v5-α 完整 API 索引
-- **2026-08-24（本次 2）**：新增 §8 v5-β 规划 API（V5B1-V5B8 全部 8 个任务的 API 接口预留）
+- **2026-08-24（v5.0.6-alpha）**：完全废弃 v4 内容（`train_model` / `evaluate_model` / `team_train.py` / `freeze_model_backbone` 等），改为 v5-α 完整 API 索引
+- **2026-08-24（v5.0.6-alpha）**：新增 §8 v5-β 规划 API（V5B1-V5B8 全部 8 个任务的 API 接口预留）
+- **2026-08-25（v5.0.7-alpha，本次）**：
+  - §8.3 V5B3 / §8.4 V5B4 / §8.6 V5B6 / §8.7 V5B7 标记已填实，给出实际接口
+  - §8.10 兼容性表更新（4 个已填实条目）

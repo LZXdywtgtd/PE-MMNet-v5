@@ -1,8 +1,11 @@
 # CUDA 安装指南
 
 > PE-MMNet v5-α GPU 环境配置 | 目标：让 `torch.cuda.is_available()` 返回 `True`
+> 版本：5.0.7-alpha | 更新：2026-08-25
 >
-> **继承说明**：v5-α GPU 训练由 `TrainerV5` 自动检测并使用。v5-α 不复用 v4 的 `team_train.py` 等级检测。CPU 训练仍可跑（仅训练慢 10-50 倍，仅用于冒烟测试）。
+> **继承说明**：v5-α GPU 训练由 `TrainerV5` 自动检测并使用。v5-α 不复用 v4 的 `team_train.py` 等级检测（V5B7 已实现新版等级检测）。CPU 训练仍可跑（仅训练慢 10-50 倍，仅用于冒烟测试）。
+>
+> **2026-08-25 更新**：增加 v5-β 依赖补充（h5py / streamlit / opencv-contrib-python 均未装，当前 v5-α 用 matplotlib 替代 + npz 替代 h5py）。
 
 ---
 
@@ -183,3 +186,33 @@ GPU: NVIDIA GeForce RTX 3060
 | RTX 3060 | 12 GB | resnet18 / vit_yolo |
 | RTX 4070 | 12 GB | 全 5 变体（部分需 batch_size=2）|
 | RTX 4090 | 24 GB | 全 5 变体 + batch_size=8 |
+
+---
+
+## 九、v5-β 依赖补充（2026-08-25 状态）
+
+> v5-α 当前环境（`pe_mmnet` conda env）依赖核查：
+
+| 依赖 | 状态 | v5-β 用途 | 替代方案 |
+|------|------|----------|----------|
+| `torch>=2.0` (cu130) | ✅ 2.13.0+cu130 | 全变体训练 | — |
+| `torchvision>=0.15` | ✅ 0.28.0+cu130 | 骨干网络 | — |
+| `timm>=1.0` | ✅ 1.0.28 | Swin/ViT 预训练 | — |
+| `scipy>=1.10` | ✅ 1.15.3 | 数据处理 | — |
+| `numpy>=1.20` | ✅ 2.2.6 | 数组操作 | — |
+| `scikit-image>=0.20` | ✅ 0.25.2 | Canny + skeletonize（V5B3 自动骨架）| — |
+| `matplotlib>=3.5` | ✅ 3.10.9 | 可视化 + V5B3 GUI | — |
+| `Pillow>=9.0` | ✅ | 图像加载 | — |
+| `h5py` | ❌ **未装** | V5B6 数据缓存（首选）| ✅ npz 等效（当前实现）|
+| `streamlit` | ❌ **未装** | V5B3/V5B8 Web GUI | ✅ matplotlib GUI（V5B3 替代）|
+| `opencv-contrib-python` | ❌ **未装** | V5B4 L0/L1 PnP / 单应性 | ✅ L3/L4 完整可用（V5B4 降级）|
+| `pyqt5` | 可选 | V5B3 备选 GUI | matplotlib 足够 |
+| `xatlas` | 待装 | V5B1 UV 展开 | v5-β 启动时引入 |
+| `FEniCS / sfepy` | 待装 | V5B5 3D FEM（可选）| v5-β 启动时按需引入 |
+
+**v5-α 替代方案总结**（V5-β 启动前无需装新包）：
+- h5py 未装 → npz 实现（V5B6 已用）
+- streamlit 未装 → matplotlib GUI 实现（V5B3 已用）
+- opencv 未装 → L3/L4 完整可用，L0/L1 自动降级（V5B4 已用）
+
+详见 [v5_已知问题.md V5-019/V5-020](v5_已知问题.md) + [v5_范围说明.md §六](v5_范围说明.md)。
