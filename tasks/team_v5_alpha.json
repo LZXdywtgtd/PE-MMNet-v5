@@ -47,10 +47,10 @@
     "time": "~3 天",
     "gpu_mem": "~0GB（独立测试）",
     "deps": [],
+    "status": "completed (2026-08-12)",
     "deliverables": [
-      "training/ordered_kp_loss.py",
-      "training/loss_combiner.py（总 loss 组合）",
-      "tests/test_ordered_kp_loss.py"
+      "training/ordered_kp_loss.py（Catmull-Rom 样条 + coverage + bbox + GP + 泊松）✅",
+      "tests/test_ordered_kp_loss.py（24 项单元测试全过）✅"
     ]
   },
   {

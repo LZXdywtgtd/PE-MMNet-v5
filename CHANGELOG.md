@@ -6,6 +6,58 @@
 
 ---
 
+## [v5.0.3-alpha] - 2026-08-12
+
+### 新增（V5A3）
+
+v5-α 主损失函数（覆盖距离 + 组合 loss）：
+
+- `training/ordered_kp_loss.py`：v5-α 核心损失
+  * `catmull_rom_spline_torch(points, num_samples)`：纯 PyTorch 三次样条拟合
+    - 端点镜像延拓 ghost points（保持 C¹ 连续）
+    - K=2 退化为线性插值
+    - 完全在 PyTorch 内实现，可对控制点求梯度（autograd 通路畅通）
+  * `coverage_loss(pred_kpts, true_pixels, M, mode)`：
+    - "chamfer"（默认，mean over true pixels of min distance）— 平滑，适合训练
+    - "hausdorff"（max over true pixels of min distance）— 严格，评估用
+  * `poisson_prior(pred_kpts)`：段长方差最小化（鼓励等弧长分布）
+  * `OrderedKeypointLoss` 组合 loss：
+    ```
+    total = 1.0  * coverage
+          + 1.0  * bbox (Smooth L1)
+          + 0.1  * gp (-log_marginal_likelihood)
+          + 0.05 * poisson
+    ```
+  * 返回 dict：`{total, coverage, bbox, gp, poisson}`（含 detached 监控值）
+- `tests/test_ordered_kp_loss.py`：24 项单元测试（全部通过）
+
+### 关键设计决策
+
+**为何选 Catmull-Rom 而非 scipy CubicSpline？**
+
+- `scipy.interpolate.CubicSpline` 不可微（基于 numpy，无 autograd 通路）
+- Catmull-Rom 是 Hermite 三次样条（C¹ 连续），完全在 PyTorch 内实现
+- 对每个 segment (P_{i-1}, P_i, P_{i+1}, P_{i+2}) 做三次插值：用户文档中"三次 B 样条"即指此
+- 端点用镜像延拓 ghost points（保持端点切线连续）
+
+### 测试
+
+- 单元测试合计：54/54 PASSED
+  * V5A1 patch_simulator: 12 项
+  * V5A2 SplineHead: 8 项
+  * V5A2 GPModule: 10 项
+  * V5A3 ordered_kp_loss: **24 项**（新增）
+- 关键验证点：
+  * 完美匹配：真值像素 = 样条采样点 → coverage loss ≈ 0（实测 0.00e+00）
+  * chamfer ≤ hausdorff（同数据）实测：0.044 ≤ 0.270 ✓
+  * 反向传播：pred_kpts / pred_bbox / GP 超参数梯度全部正常
+
+### 已知问题新增
+
+（无新增 V5-α 阻塞问题；V5-014 仍为待 V5A4 集成处理）
+
+---
+
 ## [v5.0.2-alpha] - 2026-08-12
 
 ### 新增（V5A2）
