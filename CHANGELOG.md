@@ -6,6 +6,42 @@
 
 ---
 
+## [v5.0.1-alpha] - 2026-08-12
+
+### 新增（V5A1）
+
+patch 仿真器升级（S1–S4 + S7）：
+
+- `data/thermal_profile.py`（S4）：三段升降温曲线生成器
+- `data/surface_radiation.py`（S2）：Stefan-Boltzmann 表面辐射
+- `data/viscoelastic.py`（S3）：Maxwell 粘弹性应力模型
+- `data/patch_simulator_v5.py`（S1 + S7 + 集成）：主仿真器
+- `tools/patch_simulator_visualizer.py`：4 联可视化
+- `tests/test_patch_simulator_v5.py`：12 项单元测试（全过）
+
+### 物理修复
+
+Maxwell update_step 公式多了一个 `(dt/τ)` 因子，导致累计应力被压缩4 个数量级（应 360 MPa，实际 0.02 MPa）。修正为标准离散化形式：
+
+```
+旧：σ_next = σ + dt·[(E/τ)·α·ΔT − σ/τ]
+新：σ_next = σ + E·α·ΔT − (dt/τ)·σ
+```
+
+### 验证
+
+- 单元测试：12/12 PASSED
+- 端到端冒烟：64×64 patch, peak_σ = 59.2 MPa, K = 8 关键点
+- 可视化：output/v5_sim_sample.png + v5_stress_evolution.png
+
+### 已知问题新增
+
+- V5-011：低阈值下 crack_mask 占满 patch（88% 覆盖率）
+- V5-012：v5-α 裂纹萌生判据是简化版（未用 Griffith S5 + LEFM S6）
+- V5-013：Maxwell 显式 Euler 在 dt > τ/2 时 clip 到 0
+
+---
+
 ## [v5.0.0-alpha] - 2026-08-12
 
 ### Fork

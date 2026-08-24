@@ -1,20 +1,22 @@
 [
   {
     "id": "V5A1",
-    "name": "patch 仿真器升级（S1–S4）",
-    "desc": "实现256×256 patch 仿真器，边界条件升级：S1 多方向热交换、S2 表面辐射（Stefan-Boltzmann）、S3 内部应力松弛（Maxwell 粘弹性）、S4 三段升降温曲线。配套 S7 像素级裂纹 mask 输出（基于简化判据 + 骨架化）。",
+    "name": "patch 仿真器升级（S1–S4 + S7）",
+    "desc": "实现256×256 patch 仿真器，边界条件升级：S1 多方向热交换、S2 表面辐射（Stefan-Boltzmann）、S3 内部应力松弛（Maxwell 粘弹性）、S4 三段升降温曲线、S7 像素级裂纹 mask + 8-16 动态关键点。",
     "subdir": "simulator",
     "args": "--module simulator",
     "level": "L1",
     "time": "~3 天",
     "gpu_mem": "~0GB（纯 CPU 仿真）",
     "deps": [],
+    "status": "completed (2026-08-12)",
     "deliverables": [
-      "data/patch_simulator_v5.py（核心仿真器）",
-      "data/thermal_profile.py（三段曲线生成器）",
-      "data/surface_radiation.py（S2）",
-      "data/viscoelastic.py（S3）",
-      "tools/patch_simulator_visualizer.py（结果可视化）"
+      "data/patch_simulator_v5.py（核心仿真器）✅",
+      "data/thermal_profile.py（三段曲线生成器）✅",
+      "data/surface_radiation.py（S2）✅",
+      "data/viscoelastic.py（S3）✅",
+      "tools/patch_simulator_visualizer.py（结果可视化）✅",
+      "tests/test_patch_simulator_v5.py（12 项单元测试全过）✅"
     ]
   },
   {
