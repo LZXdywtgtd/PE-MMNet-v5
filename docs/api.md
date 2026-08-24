@@ -1,549 +1,749 @@
-﻿# API 参考文档
+# API 参考文档
 
-> PE-MMNet v5-α 公开 API | 版本 5.0.5-alpha
+> PE-MMNet v5-α 公开 API | 版本 5.0.5-alpha | 更新：2026-08-24
 >
-> 注：本文件 fork 自 v4.6.11 的同名文档；v5-α 新增 API 见 §0 顶部。
+> **继承说明**：本文件由 v4.6.11 同名文档**完全重写**。v5-α **抛弃了** v4 的 6 维向量 / 二值掩膜 / `train_model` / `team_train.py` 等 API；v5-α 公开 API 全部为新写。
 >
 > 所有签名通过 `inspect.signature()` 在 commit `<latest>` 验证。
 
 ---
 
-## 0. v5-α 新增 API（V5A1-V5A5）
+## 目录
 
-### 0.1 模型 (`models`)
+| § | 模块 | 说明 |
+|---|------|------|
+| §0 | v5-α 完整 API 索引 | 所有公开入口 |
+| §1 | 模型（`models/`）| 5 变体工厂 + SplineHead + GPModule |
+| §2 | 数据（`data/`）| PatchSimulator + PatchDatasetV5 + collate_v5 |
+| §3 | 训练（`training/`）| TrainerV5 + OrderedKeypointLoss + PatchAugmentorV5 |
+| §4 | 工具（`tools/`）| 可视化 + 检查 |
+| §5 | 启动器（`run_train_v5.py`）| CLI 入口 |
 
-```python
-from models import (
-    SplineHead,                        # V5A2
-    GPModule,                          # V5A2
-    PETSNetMultimodalV5,               # V5A4
-    SwinYOLOFPNV5,                     # V5A4
-    ViTYOLOFPNV5,                      # V5A4
-    DETRStyleV5,                       # V5A4
-    SwinYOLOFPNWithPatchTSTV5,         # V5A4
-    V5_MODEL_REGISTRY,                 # 5 变体注册表
-    create_v5_model,                   # 工厂函数
-)
+---
 
-# 用法
-model = create_v5_model("resnet18", image_channels=3, use_gp=True,
-                        max_kpts=16, min_kpts=8)
-out = model(x_1d, x_2d)
-# out = {"bbox": (B,4), "keypoints": (B,K,2),
-#        "validity": (B,K), "K": (B,), "gp_lml": scalar}
-```
-
-### 0.2 损失 (`training.ordered_kp_loss`)
+## §0. v5-α 完整 API 索引
 
 ```python
-from training.ordered_kp_loss import (
-    catmull_rom_spline_torch,  # Catmull-Rom 三次样条（纯 PyTorch）
-    coverage_loss,             # 覆盖距离 loss（chamfer / hausdorff）
-    poisson_prior,             # 泊松先验（段长方差）
-    OrderedKeypointLoss,       # 组合 loss
-)
+# 模型
+from models import create_v5_model, V5_MODEL_REGISTRY
+from models import SplineHead, GPModule
+from models.pe_tsnet_multimodal_v5 import PETSNetMultimodalV5
+from models.pe_tsnet_yolo_v5 import SwinYOLOFPNV5, ViTYOLOFPNV5, ViTYOLOBackbone2DV5
+from models.pe_tsnet_detr_v5 import DETRStyleV5
+from models.pe_tsnet_patchtst_v5 import SwinYOLOFPNWithPatchTSTV5
 
-# 用法
-loss_fn = OrderedKeypointLoss(
-    lambda_coverage=1.0, lambda_bbox=1.0,
-    lambda_gp=0.1, lambda_poisson=0.05,
-    coverage_mode="chamfer", M=200,
-)
-losses = loss_fn(pred_bbox, pred_kpts, true_bbox, true_crack_pixels,
-                 gp_module=model.gp_module)
-# losses = {"total", "coverage", "bbox", "gp", "poisson"}
-```
-
-### 0.3 数据 (`data.patch_dataset_v5`)
-
-```python
+# 数据
+from data.patch_simulator_v5 import PatchSimulator
 from data.patch_dataset_v5 import PatchDatasetV5, collate_v5
+from data.thermal_profile import generate_thermal_profile, total_duration_s
+from data.surface_radiation import SurfaceRadiation
+from data.viscoelastic import ViscoelasticStress
 
-ds = PatchDatasetV5(
-    patch_size=256, n_samples=100,
-    min_kpts=8, max_kpts=16,
-    thermal_profile=None,  # 默认 11.7h 周期
-    crack_stress_threshold_MPa=50.0,
-)
-loader = DataLoader(ds, batch_size=4, collate_fn=collate_v5)
-# batch = {x_1d, x_2d, true_bbox, true_keypoints, keypoint_mask,
-#         true_crack_pixels, pixel_mask, metadata}
-```
-
-### 0.4 训练 (`training.trainer_v5`)
-
-```python
+# 训练
 from training.trainer_v5 import (
-    TrainerV5, CSVHistory,
-    save_checkpoint, load_checkpoint,
+    TrainerV5, CSVHistory, save_checkpoint, load_checkpoint,
     set_seed, get_device,
 )
+from training.ordered_kp_loss import OrderedKeypointLoss
+from training.data_aug_v5 import PatchAugmentorV5
 
-trainer = TrainerV5(
-    variant="resnet18", n_samples=100, patch_size=256,
-    batch_size=4, epochs=10, lr=1e-4,
-    min_kpts=8, max_kpts=16,
-    use_gp=True, use_aug=True,
-    log_dir="logs/training_history/run_train_v5",
-)
-final = trainer.fit(verbose=True, resume_from=None)
-# final = {"last_train_loss", "last_val_loss", "best_val_loss"}
+# 工具
+from tools.patch_simulator_visualizer import visualize_patch
 ```
 
 ---
 
-## 1. 数据模块 (`data.dataset_multimodal`)
+## §1. 模型（`models/`）
 
----
-
-## 1. 数据模块 (`data.dataset_multimodal`)
-
-### `create_multibatch_dataloaders`
+### 1.1 工厂函数
 
 ```python
-def create_multibatch_dataloaders(
-    data_roots=None,
-    batch_size=16,
-    seq_len=300,
-    image_size=256,
-    num_workers=0,
-    train_ratio=0.8,
-    augment=True,
-    predict_offset=0,
-    seq_interp_mode='interpolate',
-    remove_contours=False,
-    disabled_batches=None,
-    task='detection',
-    triple_channel=False,
-    cutmix_prob=0.0,
-) -> (train_loader, test_loader)
+def create_v5_model(
+    variant: str,
+    image_channels: int = 3,
+    pretrained_2d: bool = False,
+    use_gp: bool = True,
+    min_kpts: int = 8,
+    max_kpts: int = 16,
+    **kwargs,
+) -> nn.Module
 ```
 
-主入口。创建多批次数据加载器。
+**说明**：v5-α 唯一的模型创建入口。5 变体（`resnet18` / `swin_yolo` / `vit_yolo` / `detr` / `swin_yolo_patchtst`）通过此工厂创建。
 
-**Args**:
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `variant` | - | 5 变体 key 之一 |
+| `image_channels` | 3 | 输入通道数（v5-α 固定 3） |
+| `pretrained_2d` | False | 是否加载 ImageNet 预训练 |
+| `use_gp` | True | 是否启用 GP 嵌入模块 |
+| `min_kpts`, `max_kpts` | 8, 16 | 关键点动态范围 |
 
-- `data_roots`: 数据批次列表（None → 调 `get_all_data_batches()`）
-- `batch_size`: 批次大小
-- `seq_len`: 1D 序列长度
-- `image_size`: 2D 图像尺寸（256/384/512/768/1024）
-- `num_workers`: DataLoader workers（Windows 兼容 0）
-- `train_ratio`: train/test 划分比例
-- `augment`: 是否启用数据增强
-- `predict_offset`: 时间偏移量（0=当前，1=0.05s 后，2=0.1s 后）
-- `seq_interp_mode`: 'interpolate' 或 'pool'
-- `remove_contours`: 对参数化扫描4启用等值线去除
-- `disabled_batches`: 禁用的批次名列表
-- `task`: 'detection' / 'segmentation' / 'multitask'
-- `triple_channel`: 三通道时序输入
-- `cutmix_prob`: ThermalCutMix 概率
+**示例**：
 
-### 其他数据类
+```python
+from models import create_v5_model
+import torch
 
-| 类/函数 | 签名 | 说明 |
-|---------|------|------|
-| `get_all_data_batches()` | () | 自动扫描所有数据批次 |
-| `SingleBatchDataset(data_root, seq_len=300, image_size=256, augment=True, sample_indices=None, predict_offset=0, seq_interp_mode='interpolate', remove_contours=False, task='detection', triple_channel=False)` | 单批次数据集 |
-| `MultiBatchDataset(data_roots, train_ratio=0.8, seq_len=300, image_size=256, augment=True, seed=42)` | 多批次合并数据集 |
-| `MultiBatchCollateDataset(data_roots, split='train', train_ratio=0.8, seq_len=300, image_size=256, augment=True, seed=42, predict_offset=0, seq_interp_mode='interpolate', remove_contours=False, disabled_batches=None, task='detection', triple_channel=False)` | 多批次 + 自定义 collate |
-| `ImagePreprocessor(image_size=256, crop_ratio=0.7)` | 图像预处理（中心裁剪 + resize） |
-| `MaskLabelProcessor(image_size=256, crop_ratio=0.7, binary_threshold=0.1, invert=True)` | 分割掩膜处理 |
-| `interpolate_seq(time_points, values, target_len=300)` | 线性插值到目标长度 |
-| `process_seq(time_points, values, target_len=300, mode='interpolate')` | 'interpolate' / 'pool' 模式 |
-| `create_triple_channel_seq(seq_1d, seq_len)` | 生成 [初始, 当前, 变化率] 三通道 |
-| `compute_lw_from_density(density)` | 从密度推 l, w |
-| `imread_unicode(filepath)` | 支持中文路径的图像读取 |
+model = create_v5_model("resnet18", image_channels=3, use_gp=True, min_kpts=8, max_kpts=16)
+model = model.cuda()
+x_1d = torch.randn(4, 300).cuda()         # (B, seq_len) 1D 时序
+x_2d = torch.randn(4, 3, 256, 256).cuda() # (B, C, H, W) 2D patch
+out = model(x_1d, x_2d)
+# out: dict
+#   bbox:        (B, 4) sigmoid-normalized [0, 1]
+#   keypoints:   (B, max_kpts, 2) 关键点 (y, x)
+#   validity:    (B, max_kpts) bool mask（动态 K）
+#   K:           (B,) int，动态关键点数 ∈ [min_kpts, max_kpts]
+#   gp_lml:      scalar（仅 use_gp=True）
+```
+
+### 1.2 SplineHead（v5-α 新增）
+
+```python
+class SplineHead(nn.Module):
+    def __init__(
+        self,
+        in_dim: int,
+        min_kpts: int = 8,
+        max_kpts: int = 16,
+        hidden_dim: int = 256,
+        predict_kpts_only: bool = False,
+    ):
+        """
+        Spline 输出头：
+        - bbox: (B, 4) sigmoid-normalized [0, 1]（x1≤x2, y1≤y2 re-param）
+        - keypoints: (B, max_kpts, 2) 浮点 (y, x)
+        - validity: (B, max_kpts) bool mask（动态 K）
+        - K: (B,) int
+        """
+```
+
+**辅助方法**：
+
+```python
+def predict_kpts_only(model, sort_by: str = "x") -> torch.Tensor:
+    """
+    仅返回关键点（按 sort_by 排序）
+    sort_by: "x" | "validity"
+    """
+```
+
+### 1.3 GPModule（v5-α 新增）
+
+```python
+class GPModule(nn.Module):
+    def __init__(
+        self,
+        in_dim: int,
+        out_dim: int,
+        learnable: bool = True,
+        init_log_lengthscale: float = 0.0,
+        init_log_variance: float = 0.0,
+    ):
+        """
+        高斯过程嵌入模块：
+        - RBF kernel: k(x, x') = σ² exp(-||x-x'||² / (2ℓ²))
+        - L2 row-normalize by sqrt(in_dim) 后再算 kernel（V5-014/015 记录）
+        - log_marginal_likelihood 用作正则
+        """
+```
 
 ---
 
-## 2. 模型模块
+## §2. 数据（`data/`）
 
-### 2.1 基础模型 (`models.pe_tsnet_multimodal`)
+### 2.1 PatchSimulator（V5A1）
 
 ```python
-class PETSNetMultimodal(nn.Module):
-    def __init__(self, seq_len=300, image_channels=2, image_size=256,
-                 pretrained_2d=True, dropout=0.2, fusion='cross_attn',
-                 backbone_2d='resnet18', backbone_1d='cnn_attn'):
+class PatchSimulator:
+    def __init__(
+        self,
+        patch_size: int = 256,
+        physical_size_cm: float = 5.0,
+        thermal_profile: dict | None = None,
+        boundary_config: dict | None = None,
+        material: dict | None = None,
+        dt_s: float | None = None,
+        crack_stress_threshold_MPa: float = 50.0,
+        min_keypoints: int = 8,
+        max_keypoints: int = 16,
+        seed: int = 42,
+    ):
+        """
+        256×256 patch 仿真器
+        - S1: 多方向热交换（FDM 显式 Euler）
+        - S2: 表面辐射（Stefan-Boltzmann）
+        - S3: 内部应力松弛（Maxwell 粘弹性）
+        - S4: 三段升降温曲线
+        - S7: 像素级裂纹 mask 输出
+        """
+```
+
+```python
+def simulate(
+    self,
+    sample_interval_steps: int = 60,
+    verbose: bool = False,
+) -> dict:
+    """
+    Returns:
+        temperature_field:    (T_samples, H, W)
+        stress_field:         (T_samples, H, W)
+        heatmap:              (H, W)
+        crack_mask:           (H, W) uint8
+        crack_keypoints:      (K, 2), K ∈ [8, 16]
+        crack_bbox:           (4,)
+        metadata:             dict
+    """
+```
+
+### 2.2 PatchDatasetV5 + collate_v5（V5A5）
+
+```python
+class PatchDatasetV5(Dataset):
+    def __init__(
+        self,
+        patch_size: int = 256,
+        n_samples: int = 100,
+        min_kpts: int = 8,
+        max_kpts: int = 16,
+        seed: int = 42,
+        thermal_profile: dict | None = None,
+        crack_stress_threshold_MPa: float = 50.0,
+        precompute: bool = True,
+    ):
+        """
+        数据集：__init__ 时一次性仿真所有样本到内存 cache
+        每个 256×256 样本 ~2MB → 1000 样本 ~2GB（V5-016）
+        """
+```
+
+```python
+def collate_v5(batch: list[dict]) -> dict:
+    """
+    变长批处理：把不同长度的 true_keypoints / true_crack_pixels
+    padding 到 batch 内 max_K / max_N + mask 标记
+    
+    Returns dict:
+        x_1d:              (B, seq_len)
+        x_2d:              (B, 3, H, W)
+        true_bbox:         (B, 4)
+        true_keypoints:    (B, max_K, 2) (-1 标记 padding)
+        keypoint_mask:     (B, max_K) bool
+        true_crack_pixels: (B, max_N, 2) (-1 标记 padding)
+        pixel_mask:        (B, max_N) bool
+        metadata:          list[dict]
+    """
+```
+
+### 2.3 物理子模块
+
+```python
+from data.thermal_profile import generate_thermal_profile, total_duration_s
+
+def generate_thermal_profile(
+    ramp_up_c_per_min: float = 5.0,
+    soak_temp_c: float = 1280.0,
+    soak_duration_min: float = 30.0,
+    cool_down_c_per_min: float = 3.0,
+    room_temp_c: float = 20.0,
+    dt_s: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    生成三段升降温曲线
+    Returns (times_s, target_temps_c)
+    """
+```
+
+```python
+from data.surface_radiation import SurfaceRadiation
+from data.viscoelastic import ViscoelasticStress
+
+class SurfaceRadiation:
+    """Stefan-Boltzmann 辐射"""
+class ViscoelasticStress:
+    """Maxwell 粘弹性应力更新"""
+```
+
+---
+
+## §3. 训练（`training/`）
+
+### 3.1 TrainerV5（V5A5）
+
+```python
+class TrainerV5:
+    def __init__(
+        self,
+        variant: str = "resnet18",
+        n_samples: int = 100,
+        patch_size: int = 256,
+        batch_size: int = 4,
+        epochs: int = 10,
+        lr: float = 1e-4,
+        min_kpts: int = 8,
+        max_kpts: int = 16,
+        coverage_mode: str = "chamfer",   # "chamfer" | "hausdorff"
+        M: int = 200,                      # 样条采样点数
+        lambda_coverage: float = 1.0,
+        lambda_bbox: float = 1.0,
+        lambda_gp: float = 0.1,
+        lambda_poisson: float = 0.05,
+        use_gp: bool = True,
+        use_aug: bool = True,
+        seed: int = 42,
+        device: str | None = None,
+        log_dir: str = "logs/training_history/run_train_v5",
+        thermal_profile: dict | None = None,
+        crack_stress_threshold_MPa: float = 50.0,
+        save_every: int = 1,
+        model_kwargs: dict | None = None,
+    ):
+        """
+        训练器：单任务、单 GPU
+        """
+```
+
+```python
+def fit(
+    self,
+    resume_from: str | None = None,
+    verbose: bool = True,
+) -> dict:
+    """
+    Returns:
+        {
+            "last_train_loss": float,
+            "last_val_loss":   float,
+            "best_val_loss":   float,
+        }
+    """
+```
+
+### 3.2 CSVHistory + 检查点
+
+```python
+class CSVHistory:
+    """每个 epoch 写一行到 training_history.csv"""
+
+def save_checkpoint(
+    path: str,
+    model: nn.Module,
+    optimizer: optim.Optimizer,
+    epoch: int,
+    best_val_loss: float,
+    extra: dict | None = None,
+) -> None:
+    """保存 best.pt / latest.pt（含 RNG 状态）"""
+
+def load_checkpoint(
+    path: str,
+    model: nn.Module,
+    optimizer: optim.Optimizer | None = None,
+    device: str | torch.device = "cpu",
+) -> dict:
+    """加载检查点并恢复 RNG 状态"""
+
+def set_seed(seed: int) -> None:
+    """python / numpy / torch 三种 RNG 同时播种"""
+
+def get_device(prefer_cuda: bool = True) -> torch.device:
+    """自动选 cuda / cpu"""
+```
+
+### 3.3 OrderedKeypointLoss（V5A3）
+
+```python
+class OrderedKeypointLoss(nn.Module):
+    def __init__(
+        self,
+        min_kpts: int = 8,
+        max_kpts: int = 16,
+        coverage_mode: str = "chamfer",   # "chamfer" | "hausdorff"
+        M: int = 200,
+        lambda_coverage: float = 1.0,
+        lambda_bbox: float = 1.0,
+        lambda_gp: float = 0.1,
+        lambda_poisson: float = 0.05,
+        gp_module: GPModule | None = None,
+    ):
+        """
+        损失 = coverage + bbox + gp + poisson
+        Catmull-Rom 样条拟合预测关键点 → 等弧长采样 M 个点
+        Chamfer/Hausdorff 距离到真值裂纹像素
+        """
+```
+
+```python
+def forward(
+    self,
+    pred_bbox: torch.Tensor,           # (B, 4)
+    pred_kpts: torch.Tensor,           # (B, max_K, 2)
+    kpt_validity: torch.Tensor,        # (B, max_K) bool
+    true_bbox: torch.Tensor,           # (B, 4)
+    true_crack_pixels: torch.Tensor,   # (B, N, 2) 或 (B, 0, 2)（空）
+    pixel_mask: torch.Tensor | None = None,  # (B, N) bool
+) -> dict:
+    """
+    Returns dict:
+        total: scalar
+        coverage: scalar
+        bbox: scalar
+        gp: scalar (None if no gp_module)
+        poisson: scalar
+    """
+```
+
+### 3.4 PatchAugmentorV5（V5A5）
+
+```python
+class PatchAugmentorV5:
+    """
+    物理安全增强：hflip + vflip + rot90 + Gaussian noise
+    bbox / 关键点 / 像素坐标随图像同步变换
+    bbox 顺序（x1≤x2, y1≤y2）、值域 [0,1] 在增强后仍成立
+    """
+
+    def __init__(
+        self,
+        hflip_prob: float = 0.5,
+        vflip_prob: float = 0.5,
+        rot90_prob: float = 0.5,
+        gaussian_noise_std: float = 0.01,
+    ):
         ...
 
-    def forward(self, seq_1d, img_2d):
-        """Returns: (output, global_density) tuple."""
-```
-
-### 2.2 YOLO-FPN 变体 (`models.pe_tsnet_yolo`)
-
-```python
-class SwinYOLOFPN(nn.Module):
-    """Swin-Tiny + YOLO-FPN, 16×16 固定网格."""
-    actual_grid_size = 16  # 硬编码
-    def forward(self, seq_1d, img_2d):
-        if self.training:
-            return raw_pred, global_density  # (B, 256, 6)
-        else:
-            best_pred = raw_pred.argmax(dim=1)  # 取最高 conf 网格
-            return self.output_head(self.fusion(best_pred, feat_1d)), global_density
-
-class ViTYOLOFPN(nn.Module):
-    """ViT-Small + YOLO-FPN, dynamic grid >=16."""
-    actual_grid_size  # 动态计算
-
-class SwinYOLOFPNWithPatchTST(nn.Module):
-    """Swin + PatchTST 1D 骨干 + YOLO-FPN."""
-    actual_grid_size  # 动态计算
-```
-
-### 2.3 DETR 变体 (`models.pe_tsnet_detr`)
-
-```python
-class DETRStyle(nn.Module):
-    """ResNet-18 + 6+6 Transformer + 100 queries."""
-    d_model = 512
-    num_queries = 100
-    def forward(self, seq_1d, img_2d):
-        if self.training:
-            return raw_pred, global_density  # (B, 100, 6)
-        else:
-            best_pred = raw_pred.argmax(dim=1)
-            ...
-```
-
-### 2.4 骨干与融合
-
-| 类 | 来源 | 作用 |
-|----|------|------|
-| `ResNet18Backbone2D` | `pe_tsnet_multimodal` | 2D 空间特征 |
-| `TemporalFeatureExtractor` | `pe_tsnet_multimodal` | 1D 时序特征（Micro+Macro+SelfAttn） |
-| `CrossAttentionFusion` | `pe_tsnet_multimodal` | 双向交叉注意力 |
-| `GatedMultimodalFusion` | `pe_tsnet_multimodal` | 门控融合（温度/应力分治） |
-| `SEBlock` | `pe_tsnet_multimodal` | SE 通道注意力 |
-| `CoordAtt` | `pe_tsnet_multimodal` | 坐标注意力（保留位置信息） |
-| `BackboneWithAttention` | `pe_tsnet_multimodal` | 包装器：在 2D 骨干后注入注意力 |
-| `PatchTST1D` | `pe_tsnet_patchtst` | 1D PatchTST 骨干（patch_len=10, d_model=64, 2 层 4 头） |
-| `MaskDecoder` | `pe_tsnet_multimodal` | 分割解码器 |
-
-### 2.5 消融变体
-
-| 变体 key | 类 | 位置 |
-|----------|-----|------|
-| `1d_only` | `Model1DOnly` | `run_train.py` |
-| `2d_only` | `Model2DOnly` | `run_train.py` |
-| `concat` | `ModelConcat` | `run_train.py` |
-| `add` | `ModelAdd` | `run_train.py` |
-| `cross_attn` | `ModelCrossAttn` | `run_train.py` |
-
-### 2.6 工厂
-
-```python
-def create_model(variant_key, config, device) -> nn.Module:
-    """根据 variant_key + config 创建模型。"""
+    def __call__(
+        self,
+        x_1d: torch.Tensor,
+        x_2d: torch.Tensor,
+        bbox: torch.Tensor,
+        kpts: torch.Tensor,
+        kpt_mask: torch.Tensor,
+        pixels: torch.Tensor,
+        pixel_mask: torch.Tensor,
+    ) -> tuple:
+        ...
 ```
 
 ---
 
-## 3. 损失函数 (`training.mono_loss`)
+## §4. 工具（`tools/`）
 
-| 类 | 用途 | 默认参数 |
-|----|------|----------|
-| `MultimodalCrackLoss` | ResNet18 + 消融 | `lambda_mse_density=1.0, lambda_mono=0.1, lambda_loc=1.0, lambda_conf=1.0` |
-| `YOLOLoss` | swin_yolo / vit_yolo / swin_yolo_patchtst | `lambda_box=1.0, lambda_conf=1.0, lambda_mono=0.1`（硬编码） |
-| `DETRLoss` | detr | `matcher=HungarianMatcher(), lambda_bbox=1.0, lambda_conf=1.0, lambda_mono=0.1`（硬编码） |
-| `SegmentationLoss` | segmentation 任务 | `lambda_dice=1.0, lambda_bce=0.5` |
-| `MultimodalSegmentationLoss` | multitask 任务 | `lambda_seg=1.0, lambda_det=0.5` |
-| `YOLOTargetAssigner` | YOLO 目标分配 | `grid_size=16, nearby_range=2` |
-| `HungarianMatcher` | DETR 最优匹配 | (无参) |
-| `MonotonicityLossV3` | 单调性约束（可复用） | (无参) |
-| `SequentialMonotonicityLoss` | 序列级单调性 | (无参) |
-| `LocalizationLoss` | 定位损失 | `lambda_diou=1.0, lambda_mse=0.5, use_ciou=False` |
-| `ConfidenceLoss` | 置信度损失（BCE） | (无参) |
-| `DiceLoss` | 分割 Dice | (无参) |
-| `DensityConsistencyLoss` | 密度一致性 | `grid_size=16, neighbor_range=1, lambda_consistency=0.5` |
-| `CombinedDensityLoss` | MSE + 一致性 | `lambda_mse=1.0, lambda_consistency=0.5` |
-| `verify_monotonicity(pred)` | 函数 | 验证物理单调性 |
-
----
-
-## 4. 数据增强 (`training.augmentation`)
-
-| 类/函数 | 签名 | 说明 |
-|---------|------|------|
-| `ThermalCutMix(alpha=1.0, prob=0.0)` | 物理安全 CutMix（仅温度通道） |
-| `RandomNoise(std=0.01, prob=0.5)` | 随机噪声 |
-| `RandomFlip(p=0.5, vertical_prob=0.0)` | 随机翻转 |
-| `Compose(transforms)` | 组合多个 transform |
-
----
-
-## 5. 训练脚本 (`run_train.py`)
-
-### 公开函数
+### 4.1 可视化
 
 ```python
-def train_model(
-    model,
-    train_loader,
-    test_loader,
-    config,
-    device,
-    checkpoint_path=None,
-    task_id=None,
-    start_epoch=0,        # v4.6.10+：续训起始 epoch（0-indexed）
-    best_loss=None,        # v4.6.10+：续训时已知的最佳 loss（None → inf）
-) -> (model, metrics)
-```
+from tools.patch_simulator_visualizer import visualize_patch
 
-主训练函数。`start_epoch` 和 `best_loss` 是 v4.6.10 加的关键续训参数（之前 bug：续训时未透传导致从头开始）。
-
-```python
-def evaluate_model(
-    model,
-    device,
-    data_roots=None,
-    predict_offset=0,
-    seq_len=300,
-    seq_interp_mode='interpolate',
-    remove_contours=False,
-    disabled_batches=None,
-    task='detection',
-    image_size=256,
-    variant_key=None,
-    triple_channel=False,
-) -> metrics
-```
-
-评估模型。
-
-```python
-def estimate_training_time(
-    model, train_loader, test_loader, criterion, optimizer, device, config, scheduler=None,
-) -> dict
-```
-
-估算训练时间。
-
-```python
-def staged_training(
-    variant_key, config, device, data_roots=None, task_id=None,
-) -> model
-```
-
-分阶段训练（先短序列预训练，再长序列微调）。
-
-```python
-def eval_checkpoint(checkpoint_path, device, image_size=None) -> metrics
-```
-
-从 checkpoint 加载并评估。
-
-```python
-def freeze_model_backbone(
-    model, freeze_2d=True, freeze_1d=False, freeze_names=None,
-) -> None
-```
-
-冻结骨干（v4.6.10 后只有 `freeze_1d` 真正生效，详见 [CODE_BUGS.md B002](v5_宸茬煡闂.md)）。
-
-### 内部工具（用户不应直接调用，但可读源码理解）
-
-```python
-class ETAEstimator:
-    def __init__(self, total_epochs, alpha=0.3):
-        """EMA 平滑 ETA 估算。alpha=0.3 给新数据 30% 权重。"""
-
-def _get_2d_backbone_name(model) -> str | None:
-    """从 model 提取 2D 骨干名（'branch_2d' 等）。"""
-
-def _mark_checkpoint_complete(best_path, last_path, task_id=None, terminated_by_early_stop=False):
-    """写 is_complete=True + save_reason。v4.6.11 加幂等性 guard。"""
-
-def _build_checkpoint_data(model, config, epoch, best_loss, save_reason) -> dict:
-    """构造 checkpoint dict。"""
-
-def _delete_other_epoch_ckpts(ckpt_base: str, kind: str, keep_epoch: int, _known_files: set = None) -> int:
-    """按 ckpt_base 删同 base 下其他 epoch 的 best/last。"""
-
-def _check_signature_mismatch(saved_config: dict, current_config: dict) -> list:
-    """返回签名不匹配的字段名列表。"""
-
-def auto_select_config(args) -> dict:
-    """按空闲显存自动选 image_size / batch_size / fp16。"""
-
-def get_arch_specific_config(backbone_2d, backbone_1d, args_lr=None, args_dropout=None) -> dict:
-    """按骨干微调 lr 和 dropout。"""
-```
-
-### 工厂与常量
-
-```python
-NEW_VARIANTS = frozenset({'swin_yolo', 'vit_yolo', 'detr', 'swin_yolo_patchtst'})
-
-VARIANT_MODELS = {
-    '1d_only': Model1DOnly,
-    '2d_only': Model2DOnly,
-    'concat': ModelConcat,
-    'add': ModelAdd,
-    'cross_attn': ModelCrossAttn,
-    'resnet18': PETSNetMultimodal,
-    'swin_yolo': SwinYOLOFPN,
-    'vit_yolo': ViTYOLOFPN,
-    'detr': DETRStyle,
-    'swin_yolo_patchtst': SwinYOLOFPNWithPatchTST,
-}
-
-SIGNATURE_KEYS = [
-    'variant', 'backbone_2d', 'backbone_1d', 'fusion', 'task',
-    'predict_offset', 'triple_channel', 'use_coord_attn',
-    'feature_len', 'seq_interp_mode', 'remove_contours', 'staged_train',
-]
-_DETR_SIGNATURE_KEYS = SIGNATURE_KEYS + ['image_size']  # 13 字段
+def visualize_patch(
+    temperature_field: np.ndarray,  # (T, H, W) 或 (H, W)
+    stress_field: np.ndarray,        # 同上
+    crack_mask: np.ndarray,         # (H, W) uint8
+    keypoints: np.ndarray,          # (K, 2)
+    bbox: np.ndarray,               # (4,)
+    save_path: str = None,
+    show: bool = True,
+) -> None:
+    """
+    物理因果链展示图（V5A6 用）：
+    温度场 + 应力场 + 裂纹 mask + 关键点轨迹 的 2x2 网格图
+    """
 ```
 
 ---
 
-## 6. 启动器 (`train_launcher.py` + `launcher.py`)
+## §5. 启动器（`run_train_v5.py`）
 
-| 函数 | 位置 | 说明 |
-|------|------|------|
-| `build_command(args)` | `train_launcher.py` | 构造 shell 命令 |
-| `export_team_configs()` | `train_launcher.py` | 导出当前 args 为 JSON 任务配置 |
-| `validate_args(args)` | `train_launcher.py` | 校验参数合法性 |
-| `main()` | `train_launcher.py` | 交互式菜单入口 |
+v5-α 唯一的 CLI 入口。完整 CLI 参数：
 
-> ⚠️ `launcher.py`（889 行）和 `train_launcher.py`（286 行）功能重叠；**以 `train_launcher.py` 为准**（[CODE_BUGS.md B011](v5_宸茬煡闂.md)）。
-
----
-
-## 7. 团队协作 (`team_train.py`)
-
-```python
-def load_tasks_from_files() -> dict:
-    """从 tasks/*.json 加载所有任务（顶层数组）。
-    跳过 examples.json/example.json/template.json。"""
-
-def merge_tasks(external: Dict, defaults: Dict) -> Dict:
-    """合并外部 JSON 任务与内置 DEFAULT_TRAIN_TASKS。外部优先。"""
-
-def topological_sort(tasks: Dict, completed: Set[str]) -> list:
-    """拓扑排序，优先返回可执行任务。"""
-
-def run_training_task(task_id: str) -> bool:
-    """执行单个训练任务（subprocess 调 run_train.py）。"""
-
-def get_completed_tasks() -> set:
-    """返回已完成任务的 ID 集合。"""
-
-def get_hardware_level() -> (str, float):
-    """返回 ('L1'/'L1+'/'L2'/'L2+'/'L3', total_mem_gb)。"""
-
-def log_task_execution(task_id, status, duration_seconds=None, error=None) -> None:
-    """追加 JSON Lines 到 logs/team_training.log。"""
-
-def _resolve_task_id(ckpt: dict, task_meta=None) -> str | None:
-    """ckpt → task_id：先按 task_id 严格匹配，失败按 (variant, subdir, predict_offset) 模糊匹配。"""
-
-def _build_task_meta() -> dict:
-    """预提取每个任务的 (variant, subdir, predict_offset)，供 fuzzy match 使用。"""
-
-def _get_task_checkpoint_info(task_id: str) -> dict:
-    """返回 {epoch, best_epoch, last_epoch, is_complete, path}。"""
-
-def _resolve_python_interpreter() -> (str, str):
-    """自动选 conda / 系统 python / py 启动器。返回 (cmd, desc)。"""
-
-def import_checkpoint() -> None:
-    """交互式导入队友的 .pt 检查点。"""
+```bash
+python run_train_v5.py \
+    --variant {resnet18|swin_yolo|vit_yolo|detr|swin_yolo_patchtst} \
+    --epochs N \
+    --n_samples N \
+    --patch_size 256 \
+    --batch_size 4 \
+    --lr 1e-4 \
+    --min_kpts 8 \
+    --max_kpts 16 \
+    --coverage_mode {chamfer|hausdorff} \
+    --M 200 \
+    --lambda_coverage 1.0 \
+    --lambda_bbox 1.0 \
+    --lambda_gp 0.1 \
+    --lambda_poisson 0.05 \
+    --save_every 1 \
+    --device {cuda|cpu|None} \
+    --log_dir logs/training_history/<run> \
+    --seed 42 \
+    --resume <checkpoint.pt> \
+    --fast_thermal \
+    --no_gp \
+    --no_aug \
+    --pretrained_2d \
+    --crack_stress_threshold_MPa 50.0
 ```
 
-### 状态机常量
-
-```python
-STATUS_DONE = 'done'
-STATUS_INTERRUPTED = 'interrupted'
-STATUS_EXECUTABLE = 'executable'
-STATUS_WARNING = 'warning'  # 硬件警告
-STATUS_LOCKED = 'locked'    # 依赖未满足
-```
+详细说明见 [快速配置指南.md §五](快速配置指南.md)。
 
 ---
 
-## 8. 配置模块 (`utils.config`)
-
-```python
-def load_config() -> dict:
-    """加载 config.json。缺失字段填默认值。"""
-
-def save_config(config: dict) -> None:
-    """保存 config.json。"""
-
-def ensure_config() -> dict:
-    """首次运行交互式设置数据路径。"""
-
-def get_data_root() -> str:
-    """获取 data_root（带交互式回退）。"""
-```
-
-`config.json` schema：
-
-```json
-{
-  "data_root": "D:\\path\\to\\data",       // 必填
-  "output_dir": "./output",                // 默认 "./output"
-  "checkpoints_dir": "./checkpoints",      // 默认 "./checkpoints"
-  "results_dir": "./benchmark_results"     // 默认 "./benchmark_results"
-}
-```
-
----
-
-## 9. 控制台输出 (`utils.console`)
-
-| 函数 | 用途 |
-|------|------|
-| `print_title(text)` | 标题（粗体+大写） |
-| `print_section(text)` | 章节标题 |
-| `print_result(label, value)` | 结果行（label: value） |
-| `print_results_table(rows, headers)` | 结果表格 |
-| `print_info(text)` | 普通信息（蓝色） |
-| `print_warning(text)` | 警告（黄色） |
-| `print_error(text)` | 错误（红色） |
-| `print_success(text)` | 成功（绿色） |
-| `print_progress(epoch, total, metrics)` | 训练进度行 |
-| `print_metric_row(name, value, delta)` | 指标行（含 delta） |
-| `print_divider()` | 分隔线 |
-| `print_header(text)` | 顶部标题（带边框） |
-
-`COLORS` 字典：标准 ANSI 颜色名 + bold + reset。
-
----
-
-## 10. 工具脚本 (`tools/`)
-
-| 脚本 | 用途 |
-|------|------|
-| `batch_train_gui.py` | 队列训练 + 预览 + R² 排序对比 |
-| `cleanup_old_ckpts.py` | 清理中间 epoch 检查点（保留 1 best + 1 last） |
-| `fix_save_reason.py` | 修复 `save_reason='early_stop'` 误标 |
-| `streamlit_app.py` | Streamlit 可视化（threshold / colormap / pore-crack） |
-| `structure_analyzer.py` | 多阈值 + connected components 分离孔隙和裂纹 |
-| `test_contour_remover.py` | 等值线去除的 before/after |
-| `visualization.py` | `--check-preprocess` / `--show-contour-removal` / `--compare` / `--batch-compare` |
-| `verify_checkpoints.py`（项目根） | 检查点健康验证（`--variant` / `--detail`） |
-
----
-
-## 11. 验证签名
+## §6. 验证签名
 
 ```bash
 /c/Users/LZXdywtgtd/.conda/envs/pe_mmnet/python.exe -c "
-import inspect, run_train
-print(inspect.signature(run_train.train_model))
+import inspect
+from training.trainer_v5 import TrainerV5
+from models import create_v5_model
+from data.patch_simulator_v5 import PatchSimulator
+from data.patch_dataset_v5 import collate_v5
+from training.ordered_kp_loss import OrderedKeypointLoss
+
+print('TrainerV5.__init__:', list(inspect.signature(TrainerV5.__init__).parameters))
+print('create_v5_model:   ', list(inspect.signature(create_v5_model).parameters))
+print('PatchSimulator:    ', list(inspect.signature(PatchSimulator.__init__).parameters))
+print('collate_v5:        ', list(inspect.signature(collate_v5).parameters))
+print('OrderedKeypointLoss:', list(inspect.signature(OrderedKeypointLoss.__init__).parameters))
 "
 ```
 
-输出：
+---
 
-```
-(model, train_loader, test_loader, config, device, checkpoint_path=None, task_id=None, start_epoch=0, best_loss=None)
+## §7. 本文件的历史
+
+- **2026-08-12（V5A5）**：fork 自 v4.6.11 同名文档，§0 加 v5-α 标注
+- **2026-08-24（本次）**：完全废弃 v4 内容（`train_model` / `evaluate_model` / `team_train.py` / `freeze_model_backbone` 等），改为 v5-α 完整 API 索引
+
+---
+
+## §8. v5-β 规划 API（待实现）
+
+> **触发条件**：V5A6 评估通过。
+> **目标**：把 v5-α 算法骨架接入真实 3D 数据。
+> **预估工作量**：~16 周（4 个月）
+
+### 8.1 V5B1 — UV 展开管线
+
+```python
+# tools/uv_unwrap.py
+class UVUnwrapper:
+    """
+    3D mesh → 2D UV 映射
+    - 凸形状：xatlas 自动展开
+    - 凹形状：手工分割（杯口、碗底等）
+    """
+    def __init__(self, mesh_path: str, target_size: int = 256):
+        ...
+
+    def unwrap(self) -> UVAtlas:
+        ...
+
+# data/uv_mapper.py
+class UVMapper:
+    """
+    UV atlas ↔ 3D 表面坐标
+    """
+    def patch_to_3d(self, y: int, x: int) -> tuple[float, float, float]:
+        ...
+
+    def crack_3d_to_patch(self, crack_3d: np.ndarray) -> np.ndarray:
+        """真实裂纹 3D 坐标 → 2D patch 像素坐标"""
+        ...
 ```
 
-确认 `start_epoch` 和 `best_loss` 是 v4.6.10+ 的新增参数。
+### 8.2 V5B2 — 多角度拍摄管线
+
+```python
+# data/multi_view_capture.py
+class MultiViewCapture:
+    """多机位同步拍摄 + 标定"""
+    def capture_pre_firing(self, ceramic_id: str) -> dict:
+        """返回 3 视角 RGB + 标定参数"""
+        ...
+
+    def capture_post_firing(self, ceramic_id: str) -> dict:
+        ...
+```
+
+### 8.3 V5B3 — crack_annotator 标注工具
+
+```python
+# tools/crack_annotator.py
+class CrackAnnotator:
+    """
+    Streamlit + OpenCV 标注工具
+    - 多视图同步标注
+    - 标注一致性检查（多人标注 IoU）
+    - 导出 COCO 格式 + 自定义 JSON
+    """
+    def annotate(self, image_path: str) -> dict:
+        """
+        Returns:
+            {
+                "ceramic_id": str,
+                "view": "front" | "back" | "top",
+                "bbox": [x1, y1, x2, y2],
+                "keypoints": [(y, x), ...],  # 8-16 个有序点
+                "timestamp": str,
+                "annotator": str,
+            }
+        """
+        ...
+```
+
+### 8.4 V5B4 — 位置图像 L0/L1 完整管线
+
+```python
+# data/position_extractor.py（v5-α 占位 → v5-β 实现）
+class PositionExtractor:
+    """
+    L0: 多角度 + 标定物 → 6D pose
+    L1: 单张 + 窑体可见 → 6D pose
+    L2: 仅陶瓷 → 1D 计数
+    L3: 元数据 → 6D 默认值
+    L4: 无 → mask
+    """
+    def extract(
+        self,
+        images: list[np.ndarray],    # 多角度 RGB（≥ 1 张）
+        metadata: dict,             # {cart_id, layer_idx, kiln_params, ...}
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Returns:
+            pose_6d: (6,) [x, y, z, roll, pitch, yaw]
+            mask: (6,) bool（哪些维度有效）
+        """
+        ...
+```
+
+### 8.5 V5B5 — 3D FEM 仿真（可选）
+
+```python
+# data/fem_3d_simulator.py
+class FEM3DSimulator:
+    """
+    3D 有限元仿真（替代 2D patch 仿真）
+    - 求解器：FEniCS / sfepy
+    """
+    def __init__(
+        self,
+        mesh_path: str,
+        material: dict,
+        thermal_profile: dict,
+        boundary_conditions: dict,
+        solver: str = "fenics",
+    ):
+        ...
+
+    def solve(
+        self,
+        time_step_s: float = 60.0,
+        total_time_s: float = 42000.0,
+        output_interval_s: float = 600.0,
+    ) -> dict:
+        """
+        Returns:
+            temperature_3d: (T, N_vertices)
+            stress_3d:      (T, N_vertices, 6)
+            crack_3d:       (T, N_elements) bool
+        """
+        ...
+```
+
+### 8.6 V5B6 — 磁盘缓存
+
+```python
+# data/patch_dataset_v5.py（V5B6 改造）
+class PatchDatasetV5:
+    def __init__(
+        self,
+        data_source: str = "simulation",   # v5-α 默认 / v5-β "real_3d"
+        cache_dir: str = "data/cache",     # v5-β 新增
+        hdf5_filename: str | None = None,  # v5-β 新增
+        precompute: bool = True,           # v5-α：内存预计算 / v5-β：磁盘预计算
+    ):
+        ...
+```
+
+### 8.7 V5B7 — team_train_v5.py
+
+详见 [团队协作训练指南.md §四](团队协作训练指南.md)。
+
+```python
+# team_train_v5.py（v5-β 新建）
+def load_tasks_from_files_v5() -> list:
+    """从 tasks/team_v5_beta.json 加载所有任务（顶层数组）"""
+
+def merge_tasks_v5(external, defaults) -> list:
+    """合并外部 JSON 与内置 V5B1-V5B8"""
+
+def run_training_task_v5(task_id: str) -> bool:
+    """执行单个训练任务（subprocess 调 run_train_v5.py）"""
+
+def get_completed_tasks_v5() -> set:
+    """返回已完成任务的 ID 集合（按 best.pt 扫描）"""
+
+def import_checkpoint_v5() -> None:
+    """交互式导入队友的 .pt 检查点"""
+
+def get_hardware_level_v5() -> tuple[str, float]:
+    """返回 ('L1'/'L2'/'L3', total_mem_gb)"""
+```
+
+### 8.8 V5B8 — Streamlit v5 推理 GUI
+
+```python
+# tools/streamlit_app_v5.py
+"""
+- 上传烧后图 → 自动 UV 展开 → 推理 → 显示 3D 标注
+- 多视图融合
+- 位置 6D 显示
+"""
+```
+
+### 8.9 v5-β 模型扩展
+
+```python
+# models/pe_tsnet_multimodal_v5_beta.py（V5B4 新增）
+class PETSNetMultimodalV5Beta(nn.Module):
+    """v5-β 模型：在 v5-α 基础上加位置图像分支 + UV 映射头"""
+    def __init__(
+        self,
+        image_channels: int = 3,
+        use_gp: bool = True,
+        use_position_image: bool = True,   # v5-β 新增
+        use_uv_inverse: bool = True,       # v5-β 新增
+        ...
+    ):
+        # 复用 v5-α 组件
+        self.backbone_2d = ...
+        self.fusion = ...
+        self.gp = GPModule(...)
+        self.head = SplineHead(...)
+        # v5-β 新增
+        self.position_branch = PositionImageBranch(...)
+        self.uv_inverse_head = UVInverseHead(...)
+```
+
+### 8.10 v5-β vs v5-α API 兼容性
+
+| v5-α API | v5-β 状态 | 备注 |
+|----------|-----------|------|
+| `create_v5_model(variant)` | ✅ 兼容 + 新增 `data_source` 参数 | |
+| `PatchSimulator.simulate()` | ✅ 保留 | v5-β 可选换 `FEM3DSimulator` |
+| `PatchDatasetV5` | ✅ 兼容 + 新增 `data_source`/`cache_dir` 参数 | |
+| `collate_v5` | ✅ 兼容 + 新增 `position_6d` 字段 | |
+| `TrainerV5` | ✅ 兼容 + 新增 `use_position_image`/`use_uv_inverse` 参数 | |
+| `OrderedKeypointLoss` | ✅ 兼容 + 新增 `uv_projection_loss` | |
+| `SplineHead` | ✅ 兼容 | v5-β 加 UV 逆映射头 |
+| `GPModule` | ⚠️ 改进 | v5-β 改用 running stats（修复 V5-014/015）|
+| `run_train_v5.py` | ✅ 兼容 + 新增 v5-β CLI 参数 | |
+
+---
+
+## §9. 文档历史
+
+- **2026-08-12（V5A5）**：fork 自 v4.6.11 同名文档，§0 加 v5-α 标注
+- **2026-08-24（本次 1）**：完全废弃 v4 内容（`train_model` / `evaluate_model` / `team_train.py` / `freeze_model_backbone` 等），改为 v5-α 完整 API 索引
+- **2026-08-24（本次 2）**：新增 §8 v5-β 规划 API（V5B1-V5B8 全部 8 个任务的 API 接口预留）

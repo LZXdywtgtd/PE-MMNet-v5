@@ -1,6 +1,8 @@
 # CUDA 安装指南
 
-> PE-MMNet v4 GPU 环境配置 | 目标：让 `torch.cuda.is_available()` 返回 `True`
+> PE-MMNet v5-α GPU 环境配置 | 目标：让 `torch.cuda.is_available()` 返回 `True`
+>
+> **继承说明**：v5-α GPU 训练由 `TrainerV5` 自动检测并使用。v5-α 不复用 v4 的 `team_train.py` 等级检测。CPU 训练仍可跑（仅训练慢 10-50 倍，仅用于冒烟测试）。
 
 ---
 
@@ -95,7 +97,7 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 pip install torch torchvision
 ```
 
-> CPU 版仍可运行 `team_train.py --auto` 和小规模实验（`--epochs 2` 验证用）。生产训练（150 epoch）会非常慢。
+> CPU 版仍可运行 `run_train_v5.py --fast_thermal --epochs 1` 冒烟测试。生产训练（150 epoch × 默认周期）会非常慢，不推荐。
 
 ---
 
@@ -148,7 +150,7 @@ GPU: NVIDIA GeForce RTX 3060
 
 **解决**：装 [Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe)。
 
-### Q4: 装好后跑 `python run_train.py` 仍报 CUDA 错
+### Q4: 装好后跑 `python run_train_v5.py` 仍报 CUDA 错
 
 跑 `python -c "import torch; torch.cuda.init()"` 看具体错误信息；常见原因是 conda 环境和 pip 装的环境不一致。
 
@@ -172,4 +174,12 @@ GPU: NVIDIA GeForce RTX 3060
 
 ## 八、不想用 GPU？
 
-装 CPU 版 PyTorch（§四.3）即可，训练慢但功能完整。`team_train.py` 会自动检测并标为 `L1`（最低硬件等级）。
+装 CPU 版 PyTorch（§四.3）即可，训练慢但功能完整。`run_train_v5.py --device cpu` 可强制 CPU。
+
+### v5-α 推荐 CUDA 配置
+
+| GPU | 显存 | v5-α 适用变体 |
+|-----|------|---------------|
+| RTX 3060 | 12 GB | resnet18 / vit_yolo |
+| RTX 4070 | 12 GB | 全 5 变体（部分需 batch_size=2）|
+| RTX 4090 | 24 GB | 全 5 变体 + batch_size=8 |
