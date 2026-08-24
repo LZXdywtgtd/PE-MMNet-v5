@@ -1,0 +1,148 @@
+name: 飞书通知 (v5)
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  release:
+    types:
+      - published
+      - edited
+
+jobs:
+  feishu-notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 发送飞书通知
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const webhook = '${{ secrets.FEISHU_WEBHOOK }}';
+            const repo = context.payload.repository?.full_name || 'LZXdywtgtd/PE-MMNet-v5';
+            const repoUrl = `https://github.com/${repo}`;
+
+            let title = '';
+            let content = '';
+            let color = '#3498db';
+
+            // 判断触发类型
+            if (context.eventName === 'release') {
+              const tag = context.payload.release?.tag_name || '';
+              const releaseName = context.payload.release?.name || tag;
+              const body = context.payload.release?.body || '';
+              const isPrerelease = context.payload.release?.prerelease || false;
+
+              title = `🚀 ${isPrerelease ? '预发布' : '正式发布'} v${tag.replace('v', '')}`;
+              content = `**${releaseName}**\n\n${body.substring(0, 500)}${body.length > 500 ? '...' : ''}`;
+              color = isPrerelease ? '#f39c12' : '#27ae60';
+            } else {
+              // ====== Push 事件 ======
+              const commits = context.payload.commits || [];
+              const totalCommits = commits.length;
+              const branch = context.ref.replace('refs/heads/', '');
+
+              // 构建标题
+              title = `📝 ${totalCommits} 个提交推送到 ${branch}`;
+
+              if (totalCommits === 1) {
+                // 单个提交时，显示完整信息
+                const singleCommit = commits[0];
+                const fullMessage = singleCommit.message;
+                const lines = fullMessage.split('\n');
+                const subject = lines[0];
+                let body = lines.slice(1).join('\n').trim();
+
+                let bodyDisplay = '';
+                if (body) {
+                  const MAX_BODY_LEN = 1500;
+                  bodyDisplay = body.length > MAX_BODY_LEN
+                    ? body.substring(0, MAX_BODY_LEN) + '\n\n... (内容已截断)'
+                    : body;
+                  bodyDisplay = `\n\n📝 **详细变更:**\n\`\`\`\n${bodyDisplay}\n\`\`\``;
+                }
+
+                title = `📝 代码更新 - ${branch}`;
+                content = `**${subject}**\n\n` +
+                          `📌 提交: \`${singleCommit.id.substring(0, 7)}\`\n` +
+                          `👤 作者: ${singleCommit.author?.name || 'Unknown'}\n` +
+                          `🌿 分支: ${branch}` +
+                          bodyDisplay;
+              } else {
+                // 多个提交时，显示列表
+                let commitLines = [];
+                const MAX_DISPLAY = 10;
+
+                commits.slice(0, MAX_DISPLAY).forEach((c, index) => {
+                  const subject = c.message.split('\n')[0];
+                  const hash = c.id.substring(0, 7);
+                  const author = c.author?.name || 'Unknown';
+                  commitLines.push(`${index + 1}. ${subject} (${hash}) - ${author}`);
+                });
+
+                let commitListDisplay = commitLines.join('\n');
+                if (totalCommits > MAX_DISPLAY) {
+                  commitListDisplay += `\n... 以及 ${totalCommits - MAX_DISPLAY} 个提交`;
+                }
+
+                content = `**本次推送包含 ${totalCommits} 个提交:**\n\n` +
+                          `\`\`\`\n${commitListDisplay}\n\`\`\`\n\n` +
+                          `🔗 [查看所有提交](${repoUrl}/commits/${branch})`;
+              }
+              color = '#3498db';
+            }
+
+            // 构建卡片消息
+            const card = {
+              msg_type: "interactive",
+              card: {
+                schema: "2.0",
+                config: {
+                  update_multi: true
+                },
+                header: {
+                  title: {
+                    tag: "plain_text",
+                    content: title
+                  },
+                  template: "blue"
+                },
+                body: {
+                  direction: "vertical",
+                  padding: "12px 12px 12px 12px",
+                  elements: [
+                    {
+                      tag: "markdown",
+                      content: content
+                    },
+                    {
+                      tag: "hr"
+                    },
+                    {
+                      tag: "div",
+                      text: {
+                        tag: "lark_md",
+                        content: `📦 **PE-MMNet-v5** | [查看代码](${repoUrl}) | [Releases](${repoUrl}/releases)`
+                      }
+                    }
+                  ]
+                }
+              }
+            };
+
+            // 发送请求
+            const payload = JSON.stringify(card);
+            const response = await fetch(webhook, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: payload
+            });
+
+            if (!response.ok) {
+              console.error('飞书通知发送失败:', await response.text());
+              core.setFailed('飞书通知发送失败');
+            } else {
+              console.log('飞书通知发送成功');
+            }
+        env:
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}

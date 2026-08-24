@@ -1,0 +1,105 @@
+[
+  {
+    "id": "V5A1",
+    "name": "patch 仿真器升级（S1–S4）",
+    "desc": "实现256×256 patch 仿真器，边界条件升级：S1 多方向热交换、S2 表面辐射（Stefan-Boltzmann）、S3 内部应力松弛（Maxwell 粘弹性）、S4 三段升降温曲线。配套 S7 像素级裂纹 mask 输出（基于简化判据 + 骨架化）。",
+    "subdir": "simulator",
+    "args": "--module simulator",
+    "level": "L1",
+    "time": "~3 天",
+    "gpu_mem": "~0GB（纯 CPU 仿真）",
+    "deps": [],
+    "deliverables": [
+      "data/patch_simulator_v5.py（核心仿真器）",
+      "data/thermal_profile.py（三段曲线生成器）",
+      "data/surface_radiation.py（S2）",
+      "data/viscoelastic.py（S3）",
+      "tools/patch_simulator_visualizer.py（结果可视化）"
+    ]
+  },
+  {
+    "id": "V5A2",
+    "name": "Spline 输出头 + GP 模块",
+    "desc": "实现 v5 新增的两个核心模块：(1) Spline 输出头，从融合特征回归 bbox + 8–16 动态关键点；(2) GP 嵌入模块，将物理约束以高斯过程先验形式嵌入数据流。",
+    "subdir": "heads",
+    "args": "--module heads",
+    "level": "L1",
+    "time": "~1 周",
+    "gpu_mem": "~0GB（独立测试）",
+    "deps": [],
+    "deliverables": [
+      "models/spline_head.py（bbox + 关键点回归）",
+      "models/gp_module.py（GP 嵌入模块）",
+      "tests/test_spline_head.py（单元测试）",
+      "tests/test_gp_module.py（单元测试）"
+    ]
+  },
+  {
+    "id": "V5A3",
+    "name": "覆盖距离 loss（B 样条 + Hausdorff）",
+    "desc": "实现 training/ordered_kp_loss.py。核心逻辑：(1) 用预测关键点拟合三次 B 样条曲线；(2) 在曲线上密集采样 M 个点；(3) 真值裂纹像素到曲线的最小距离 → Hausdorff 距离作为 loss。配套：bbox Smooth L1 loss、GP 模块正则项、泊松先验项。",
+    "subdir": "loss",
+    "args": "--module loss",
+    "level": "L1",
+    "time": "~3 天",
+    "gpu_mem": "~0GB（独立测试）",
+    "deps": [],
+    "deliverables": [
+      "training/ordered_kp_loss.py",
+      "training/loss_combiner.py（总 loss 组合）",
+      "tests/test_ordered_kp_loss.py"
+    ]
+  },
+  {
+    "id": "V5A4",
+    "name": "5 变体输出头迁移",
+    "desc": "将 v4 的 5 个模型变体（resnet18 / swin_yolo / vit_yolo / detr / swin_yolo_patchtst）的 output_head 替换为 Spline 输出头。骨干网络与中间层不动，确保 v5-α 的 5 变体可独立训练。",
+    "subdir": "backbones",
+    "args": "--module backbones",
+    "level": "L2",
+    "time": "~2 周",
+    "gpu_mem": "~2-5GB（按变体）",
+    "deps": ["V5A2", "V5A3"],
+    "deliverables": [
+      "models/pe_tsnet_multimodal_v5.py（resnet18 变体）",
+      "models/pe_tsnet_yolo_v5.py（swin_yolo + vit_yolo）",
+      "models/pe_tsnet_detr_v5.py（DETR 变体）",
+      "models/pe_tsnet_patchtst_v5.py（PatchTST 变体）",
+      "models/__init__.py（v5 注册）"
+    ]
+  },
+  {
+    "id": "V5A5",
+    "name": "变长训练循环（trainer_v5）",
+    "desc": "实现 training/trainer_v5.py，支持：变长关键点 batch 化、GP 模块正则注入、覆盖距离 loss 调用、动态 K 选择、断点续训与 CSV 训练历史。沿用 v4 的 train_launcher / team_train 接口风格。",
+    "subdir": "trainer",
+    "args": "--module trainer",
+    "level": "L2",
+    "time": "~1 周",
+    "gpu_mem": "~0GB（代码层）",
+    "deps": ["V5A4"],
+    "deliverables": [
+      "training/trainer_v5.py",
+      "training/data_aug_v5.py（数据增强）",
+      "run_train_v5.py（统一入口）",
+      "tests/test_trainer_v5_smoke.py（冒烟测试）"
+    ]
+  },
+  {
+    "id": "V5A6",
+    "name": "5 变体训练 + 评估（150 epoch）",
+    "desc": "在 5 个变体上各跑 150 epoch 完整训练，对比 v4 与 v5 在覆盖距离、关键点 MAE、bbox IoU 等指标上的差异。输出训练历史 CSV + 评估报告 + 可视化样例。",
+    "subdir": "evaluation",
+    "args": "--variant all --epochs 150 --lr 1e-4",
+    "level": "L3",
+    "time": "~3 周",
+    "gpu_mem": "~2-5GB（按变体）",
+    "deps": ["V5A1", "V5A5"],
+    "deliverables": [
+      "logs/training_history/V5A*.csv",
+      "checkpoints/v5/{variant}/",
+      "benchmark_results/v5_comparison.md",
+      "docs/archived/v5_evaluation_report.md"
+    ]
+  }
+]

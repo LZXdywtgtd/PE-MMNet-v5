@@ -1,0 +1,109 @@
+[
+  {
+    "id": "B1",
+    "name": "门控融合优化",
+    "desc": "基于ResNet18：温度/应力通道分治门控融合",
+    "subdir": "gated",
+    "args": "--variant resnet18 --fusion gated --epochs 2 --patience 30",
+    "level": "L2",
+    "time": "~15小时",
+    "gpu_mem": "~2GB",
+    "deps": [
+      "A1"
+    ]
+  },
+  {
+    "id": "B2",
+    "name": "坐标注意力优化",
+    "desc": "基于ResNet18：引入空间坐标注意力模块(CoordAtt)",
+    "subdir": "coord",
+    "args": "--variant resnet18 --use_coord_attn --epochs 2 --patience 30",
+    "level": "L2",
+    "time": "~15小时",
+    "gpu_mem": "~2GB",
+    "deps": [
+      "A1"
+    ]
+  },
+  {
+    "id": "B3",
+    "name": "分阶段训练优化",
+    "desc": "基于ResNet18：先短序列预训练，后长序列微调",
+    "subdir": "staged",
+    "args": "--variant resnet18 --staged_train --epochs 2 --patience 30",
+    "level": "L2+",
+    "time": "~20小时",
+    "gpu_mem": "~2GB",
+    "deps": [
+      "A1"
+    ]
+  },
+  {
+    "id": "B4",
+    "name": "三通道输入优化",
+    "desc": "基于ResNet18：增加初始温度，温度变化率通道",
+    "subdir": "triple",
+    "args": "--variant resnet18 --triple_channel --epochs 2 --patience 30",
+    "level": "L2",
+    "time": "~15小时",
+    "gpu_mem": "~2GB",
+    "deps": [
+      "A1"
+    ]
+  },
+  {
+    "id": "B5",
+    "name": "ThermalCutMix增强",
+    "desc": "基于ResNet18：引入物理安全的温度场CutMix数据增强",
+    "subdir": "cutmix",
+    "args": "--variant resnet18 --aug_cutmix_prob 0.3 --epochs 2 --patience 30",
+    "level": "L2",
+    "time": "~15小时",
+    "gpu_mem": "~2GB",
+    "deps": [
+      "A1"
+    ]
+  },
+  {
+    "id": "C1",
+    "name": "门控+坐标注意力",
+    "desc": "组合优化：门控融合+坐标注意力",
+    "subdir": "gated_coord",
+    "args": "--variant resnet18 --fusion gated --use_coord_attn --epochs 2 --patience 30",
+    "level": "L2",
+    "time": "~18小时",
+    "gpu_mem": "~2GB",
+    "deps": [
+      "B1",
+      "B2"
+    ]
+  },
+  {
+    "id": "C2",
+    "name": "分阶段+坐标注意力",
+    "desc": "组合优化：分阶段训练+坐标注意力",
+    "subdir": "staged_coord",
+    "args": "--variant resnet18 --staged_train --use_coord_attn --epochs 2 --patience 30",
+    "level": "L2+",
+    "time": "~24小时",
+    "gpu_mem": "~2GB",
+    "deps": [
+      "B2",
+      "B3"
+    ]
+  },
+  {
+    "id": "C3",
+    "name": "全组合优化",
+    "desc": "终极组合：门控+坐标注意力+分阶段训练，最强性能验证",
+    "subdir": "full",
+    "args": "--variant resnet18 --fusion gated --use_coord_attn --staged_train --epochs 2 --patience 30",
+    "level": "L3",
+    "time": "~24小时",
+    "gpu_mem": "~2GB",
+    "deps": [
+      "C1",
+      "C2"
+    ]
+  }
+]

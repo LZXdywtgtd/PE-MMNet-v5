@@ -1,0 +1,38 @@
+{
+  "_comment": "PE-MMNet v5-α 配置文件示例（真实配置请复制为 config.json，config.json 已被 .gitignore 排除）",
+  "_how_to_use": "复制此文件为 config.json，修改 data_root 为你的数据路径即可",
+  "_version": "5.0.0-alpha",
+  "_forked_from": "v4.6.12",
+
+  "data_root": "D:\\项目路径\\参考输入",
+
+  "_v5_specific": {
+    "patch_size": 256,
+    "min_keypoints": 8,
+    "max_keypoints": 16,
+    "kiln_dims_cm": {
+      "_comment": "窑体内部尺寸（高 × 宽 × 深），用于位置图像先验与未来 v5-β",
+      "height": 80.0,
+      "width": 60.0,
+      "depth": 60.0
+    },
+    "thermal_profile": {
+      "_comment": "三段升降温曲线（会议 5：升温 / 保温 / 降温）",
+      "ramp_up_c_per_min": 5.0,
+      "soak_temp_c": 1280.0,
+      "soak_duration_min": 30,
+      "cool_down_c_per_min": 3.0
+    },
+    "boundary": {
+      "_comment": "S1–S4 仿真边界条件升级",
+      "multi_direction_heat": true,
+      "surface_radiation": true,
+      "stress_relaxation": true
+    },
+    "position_image_mode": "L3_disabled"
+  },
+
+  "checkpoints_dir": "./checkpoints",
+  "results_dir": "./benchmark_results",
+  "logs_dir": "./logs"
+}

@@ -1,0 +1,57 @@
+[
+  {
+    "id": "A1",
+    "name": "ResNet18基线",
+    "desc": "轻量级CNN骨干，所有优化的基准线",
+    "subdir": "baseline",
+    "args": "--variant resnet18 --epochs 2 --patience 30",
+    "level": "L1",
+    "time": "~12小时",
+    "gpu_mem": "~2GB",
+    "deps": []
+  },
+  {
+    "id": "A2",
+    "name": "Swin-YOLO基线",
+    "desc": "推荐！Swin-Tiny骨干+YOLO网格回归，大幅提升空间定位",
+    "subdir": "baseline",
+    "args": "--variant swin_yolo --epochs 2 --patience 30 --lr 1e-4",
+    "level": "L1+",
+    "time": "~18小时",
+    "gpu_mem": "~4GB",
+    "deps": []
+  },
+  {
+    "id": "A3",
+    "name": "ViT-YOLO基线",
+    "desc": "基于ViT-Small的YOLO变体，验证Transformer做骨干的效果",
+    "subdir": "baseline",
+    "args": "--variant vit_yolo --epochs 2 --patience 30 --lr 1e-4",
+    "level": "L1",
+    "time": "~12小时",
+    "gpu_mem": "~3GB",
+    "deps": []
+  },
+  {
+    "id": "A4",
+    "name": "DETR基线",
+    "desc": "纯Transformer的DETR端到端检测，验证全局上下文感知",
+    "subdir": "baseline",
+    "args": "--variant detr --epochs 2 --patience 30 --lr 1e-4",
+    "level": "L1+",
+    "time": "~18小时",
+    "gpu_mem": "~5GB",
+    "deps": []
+  },
+  {
+    "id": "A5",
+    "name": "Swin-YOLO-PatchTST",
+    "desc": "Swin-YOLO基线 + PatchTST 1D时序骨干，提升热应力时序建模",
+    "subdir": "baseline",
+    "args": "--variant swin_yolo_patchtst --epochs 2 --patience 30 --lr 1e-4",
+    "level": "L1+",
+    "time": "~18小时",
+    "gpu_mem": "~4GB",
+    "deps": []
+  }
+]

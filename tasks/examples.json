@@ -1,0 +1,92 @@
+[
+  {
+    "id": "EXAMPLE_BASELINE",
+    "name": "快速基线训练",
+    "desc": "适用场景：快速验证代码能跑通",
+    "args": "--variant resnet18 --epochs 50 --batch_size 8",
+    "level": "L1",
+    "time": "~30分钟",
+    "gpu_mem": "~2GB",
+    "deps": []
+  },
+  {
+    "id": "EXAMPLE_YOLO_SWIN",
+    "name": "Swin-YOLO训练",
+    "desc": "适用场景：需要更好的空间定位能力",
+    "args": "--variant swin_yolo --epochs 100 --lr 1e-4",
+    "level": "L1+",
+    "time": "~40分钟",
+    "gpu_mem": "~4GB",
+    "deps": []
+  },
+  {
+    "id": "EXAMPLE_YOLO_VIT",
+    "name": "ViT-YOLO训练",
+    "desc": "适用场景：需要更好的全局注意力",
+    "args": "--variant vit_yolo --epochs 100 --lr 1e-4",
+    "level": "L1",
+    "time": "~40分钟",
+    "gpu_mem": "~3GB",
+    "deps": []
+  },
+  {
+    "id": "EXAMPLE_DETR",
+    "name": "DETR训练",
+    "desc": "适用场景：全局上下文感知",
+    "args": "--variant detr --epochs 100 --lr 1e-4",
+    "level": "L2",
+    "time": "~40分钟",
+    "gpu_mem": "~5GB",
+    "deps": []
+  },
+  {
+    "id": "EXAMPLE_PATCHTST",
+    "name": "PatchTST训练",
+    "desc": "适用场景：需要更好的时序建模能力",
+    "args": "--variant swin_yolo_patchtst --epochs 100 --lr 1e-4",
+    "level": "L1+",
+    "time": "~40分钟",
+    "gpu_mem": "~4GB",
+    "deps": []
+  },
+  {
+    "id": "EXAMPLE_GATED",
+    "name": "门控融合优化",
+    "desc": "适用场景：追求最佳性能",
+    "args": "--variant resnet18 --fusion gated --epochs 100",
+    "level": "L2",
+    "time": "~1小时",
+    "gpu_mem": "~2GB",
+    "deps": ["EXAMPLE_BASELINE"]
+  },
+  {
+    "id": "EXAMPLE_STAGED",
+    "name": "分阶段训练",
+    "desc": "适用场景：长序列数据训练",
+    "args": "--variant resnet18 --staged_train --epochs 100",
+    "level": "L2+",
+    "time": "~1.5小时",
+    "gpu_mem": "~2-4GB",
+    "deps": ["EXAMPLE_BASELINE"]
+  },
+  {
+    "id": "EXAMPLE_TRIPLE",
+    "name": "三通道输入训练",
+    "desc": "适用场景：需要温度变化率信息",
+    "args": "--variant resnet18 --triple_channel --epochs 100",
+    "level": "L2",
+    "time": "~1小时",
+    "gpu_mem": "~2GB",
+    "deps": ["EXAMPLE_BASELINE"]
+  },
+  {
+    "id": "EXAMPLE_FULL",
+    "name": "完整训练",
+    "desc": "适用场景：最终交付模型",
+    "args": "--variant resnet18 --epochs 200 --batch_size 16",
+    "level": "L2",
+    "time": "~2小时",
+    "gpu_mem": "~2GB",
+    "deps": []
+  }
+]

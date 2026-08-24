@@ -1,0 +1,132 @@
+# ============================================================
+# PE-MMNet v5 .gitignore
+# ============================================================
+# Fork 自 v4.6.12，更新时间：2026-08-12
+# 用途: 排除数据、模型、配置文件、日志等敏感文件
+# ============================================================
+
+# === 核心安全排除（防数据包误传） ===
+# 数据目录 - 包含敏感仿真数据
+参考输入/
+仿真数据/
+simulation/
+raw_data/
+data/raw/
+data/examples/
+
+# 图像和视频文件
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.tiff
+*.gif
+*.mp4
+*.avi
+*.mov
+
+# CSV 和表格数据
+*.csv
+*.xlsx
+*.xls
+*.parquet
+
+# === 配置文件与本地环境 ===
+# 项目配置（包含数据路径等敏感信息）
+config.json
+config.local.json
+config.local.*
+*.local.json
+.env
+.env.*
+
+# === 训练产物与缓存 ===
+# 检查点（模型权重）
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+
+# ONNX 模型
+*.onnx
+
+# 训练日志
+logs/
+*.log
+train_log.txt
+session_commands.json
+
+# Benchmark 结果（可选保留）
+benchmark_results/*.json
+benchmark_results/table*.md
+benchmark_results/*_results.md
+!benchmark_results/README.md
+
+# 结果文件
+result.json
+mm_dbnet_results.json
+output/
+results/
+
+# === Python 环境 ===
+.venv/
+venv/
+env/
+ENV/
+.conda/
+.pytest_cache/
+.mypy_cache/
+*.pyc
+*.pyo
+__pycache__/
+*.egg-info/
+.Python
+build/
+dist/
+downloads/
+*.egg
+
+# === Streamlit 缓存 ===
+.streamlit/secrets.toml
+
+# === 编辑器缓存 ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# === 临时文件 ===
+*.tmp
+*.bak
+*.backup
+catboost_info/
+temp/
+tmp/
+
+# === 诊断报告 ===
+data/diagnosis_report.json
+*.report.json
+
+# === 旧代码（保留目录结构） ===
+old_code/
+legacy/
+
+# ============================================================
+# 保留文件（不要排除）
+# ============================================================
+!checkpoints/.gitkeep
+!logs/.gitkeep
+!benchmark_results/.gitkeep
+!data/.gitkeep
+!output/.gitkeep
+
+# ============================================================
+# v5 占位文件（已跟踪）
+# ============================================================
+# spline_head.py / gp_module.py / ordered_kp_loss.py /
+# patch_simulator_v5.py / position_extractor.py /
+# crack_annotator.py 均为 v5-α 占位，已跟踪，提交后保留
+# ============================================================
