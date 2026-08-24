@@ -29,11 +29,12 @@
     "time": "~1 周",
     "gpu_mem": "~0GB（独立测试）",
     "deps": [],
+    "status": "completed (2026-08-12)",
     "deliverables": [
-      "models/spline_head.py（bbox + 关键点回归）",
-      "models/gp_module.py（GP 嵌入模块）",
-      "tests/test_spline_head.py（单元测试）",
-      "tests/test_gp_module.py（单元测试）"
+      "models/spline_head.py（bbox + 关键点回归）✅",
+      "models/gp_module.py（GP 嵌入模块）✅",
+      "tests/test_spline_head.py（8 项单元测试全过）✅",
+      "tests/test_gp_module.py（10 项单元测试全过）✅"
     ]
   },
   {

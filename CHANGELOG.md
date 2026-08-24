@@ -6,6 +6,50 @@
 
 ---
 
+## [v5.0.2-alpha] - 2026-08-12
+
+### 新增（V5A2）
+
+模型输出头与物理约束模块：
+
+- `models/spline_head.py`：Spline 输出头
+  * 输入：(B, in_dim) 融合特征
+  * 输出：bbox (B, 4) + 关键点 (B, max_kpts, 2) + validity (B, max_kpts) + K (B,)
+  * K 动态范围 [min_kpts, max_kpts] = [8, 16]
+  * bbox 自动满足 x1≤x2, y1≤y2（重新参数化）
+  * `predict_kpts_only(sort_by="x"|"validity")` 推理便捷接口
+- `models/gp_module.py`：GP 嵌入模块
+  * 可微 RBF 核平滑（ℓ、σ² 可学习）
+  * log_marginal_likelihood 正则项
+  * LayerNorm 稳定输出
+  * 非可学习模式（buffer）支持
+- `tests/test_spline_head.py`：8 项单元测试（值域、bbox 顺序、反向传播、推理接口）
+- `tests/test_gp_module.py`：10 项单元测试（核对称、LML、超参数梯度、batch=1 边界）
+
+### 关键修复
+
+**GP 模块 K 矩阵退化为单位矩阵**：
+
+- 现象：默认 in_dim=128 时，||x_i - x_j||² ~ 128，远超默认 ℓ=1.0，
+  导致 K ≈ I（单位矩阵），GP 平滑失效
+- 修复：`_normalize_for_kernel` 改为按 L2 范数归一化（除以 sqrt(in_dim)），
+  使 ||x_i - x_j||² ~ O(1)，ℓ=1.0 物理意义清晰
+- 影响：修复后 GP 模块对超参数 ℓ/σ² 都有非零梯度（之前 ≈ 0）
+
+### 测试
+
+- 单元测试合计：30/30 PASSED
+  * V5A1 patch_simulator: 12 项
+  * V5A2 SplineHead: 8 项
+  * V5A2 GPModule: 10 项
+
+### 已知问题新增
+
+- V5-014：GP 模块依赖 batch 内 L2 归一化（无 running stats）
+  → 训练/推理 stats 不一致风险（v5-α MVP 可接受）
+
+---
+
 ## [v5.0.1-alpha] - 2026-08-12
 
 ### 新增（V5A1）
