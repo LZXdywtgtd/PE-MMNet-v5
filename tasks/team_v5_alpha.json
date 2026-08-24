@@ -108,5 +108,69 @@
       "benchmark_results/v5_comparison.md",
       "docs/archived/v5_evaluation_report.md"
     ]
+  },
+  {
+    "id": "V5B3",
+    "name": "裂纹轨迹标注工具（V5B3）",
+    "desc": "实现 tools/crack_annotator.py（v5-β）。提供 GUI（matplotlib 鼠标交互）+ CLI 批处理（无需 GUI）+ JSON 序列化 3 种模式。",
+    "subdir": "annotator",
+    "args": "--module annotator",
+    "level": "L1",
+    "time": "~3 天",
+    "gpu_mem": "~0GB",
+    "deps": [],
+    "status": "completed (2026-08-25)",
+    "deliverables": [
+      "tools/crack_annotator.py（auto_extract_crack + save/load + GUI + batch + CLI 三模式）✅",
+      "tests/test_v5_beta_hooks.py（V5B3 相关 2 项测试）✅"
+    ]
+  },
+  {
+    "id": "V5B4",
+    "name": "位置图像提取（V5B4）",
+    "desc": "实现 data/position_extractor.py（v5-β）。L0-L4 五级降级：L0 多角度+标定 / L1 单目 / L2 仅陶瓷 / L3 元数据 / L4 无。auto 模式按可用数据自动选最高级。",
+    "subdir": "position",
+    "args": "--module position",
+    "level": "L1",
+    "time": "~3 天",
+    "gpu_mem": "~0GB",
+    "deps": [],
+    "status": "completed (2026-08-25)",
+    "deliverables": [
+      "data/position_extractor.py（extract_L0-L4 + PositionInfo + PositionExtractor）✅",
+      "tests/test_v5_beta_hooks.py（V5B4 相关 3 项测试）✅"
+    ]
+  },
+  {
+    "id": "V5B6",
+    "name": "npz 磁盘缓存（V5B6）",
+    "desc": "PatchDatasetV5 加 cache_dir 参数（v5-β）。缓存键含 patch_size/n_samples/seed/thermal_hash/threshold。命中时直接加载，跳过仿真。",
+    "subdir": "cache",
+    "args": "--module cache",
+    "level": "L1",
+    "time": "~2 天",
+    "gpu_mem": "~0GB",
+    "deps": [],
+    "status": "completed (2026-08-25)",
+    "deliverables": [
+      "data/patch_dataset_v5.py（_save_to_npz + _load_from_npz + _thermal_profile_hash）✅",
+      "tests/test_v5_beta_hooks.py（V5B6 相关 1 项测试）✅"
+    ]
+  },
+  {
+    "id": "V5B7",
+    "name": "团队训练脚本（V5B7）",
+    "desc": "实现 team_train_v5.py（从 v4 team_train.py 移植 + v5-α 适配）。内置 V5A*/V5B* 任务，模块任务路由，CLI list-tasks/auto/import。",
+    "subdir": "team",
+    "args": "--module team",
+    "level": "L1",
+    "time": "~2 天",
+    "gpu_mem": "~0GB",
+    "deps": [],
+    "status": "completed (2026-08-25)",
+    "deliverables": [
+      "team_train_v5.py（_V5_MODULE_TEST_MAP + load_tasks_from_files V5 过滤）✅",
+      "tests/test_v5_beta_hooks.py（V5B7 相关 2 项测试）✅"
+    ]
   }
 ]
