@@ -1,4 +1,4 @@
-# API 参考文档
+﻿# API 参考文档
 
 > PE-MMNet v5-α 公开 API | 版本 5.0.5-alpha
 >
@@ -341,7 +341,7 @@ def freeze_model_backbone(
 ) -> None
 ```
 
-冻结骨干（v4.6.10 后只有 `freeze_1d` 真正生效，详见 [CODE_BUGS.md B002](../CODE_BUGS.md)）。
+冻结骨干（v4.6.10 后只有 `freeze_1d` 真正生效，详见 [CODE_BUGS.md B002](v5_宸茬煡闂.md)）。
 
 ### 内部工具（用户不应直接调用，但可读源码理解）
 
@@ -409,7 +409,7 @@ _DETR_SIGNATURE_KEYS = SIGNATURE_KEYS + ['image_size']  # 13 字段
 | `validate_args(args)` | `train_launcher.py` | 校验参数合法性 |
 | `main()` | `train_launcher.py` | 交互式菜单入口 |
 
-> ⚠️ `launcher.py`（889 行）和 `train_launcher.py`（286 行）功能重叠；**以 `train_launcher.py` 为准**（[CODE_BUGS.md B011](../CODE_BUGS.md)）。
+> ⚠️ `launcher.py`（889 行）和 `train_launcher.py`（286 行）功能重叠；**以 `train_launcher.py` 为准**（[CODE_BUGS.md B011](v5_宸茬煡闂.md)）。
 
 ---
 

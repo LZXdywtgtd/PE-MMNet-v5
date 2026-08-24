@@ -84,10 +84,10 @@ v5-α 范围**严格限定**：
 
 ## v4 沿用（v5 fork 自 v4，未改动）
 
-- 用户指南 → [docs/user_guides/](docs/user_guides/)
-- 开发参考 → [docs/dev_reference/](docs/dev_reference/)
-- 协作训练 → [docs/collaboration/](docs/collaboration/)
-- 实验报告 → [docs/experiment_reports/](docs/experiment_reports/)
+- 用户指南 → [docs/快速配置指南.md](docs/快速配置指南.md) / [docs/CUDA安装指南.md](docs/CUDA安装指南.md)
+- 开发参考 → [docs/api.md](docs/api.md) / [docs/开发人员文档.md](docs/开发人员文档.md)
+- 协作训练 → [docs/团队协作训练指南.md](docs/团队协作训练指南.md)
+- 实验报告 → [docs/项目算法与训练实验设计报告.md](docs/项目算法与训练实验设计报告.md) / [docs/调参与算法工程指导文档.md](docs/调参与算法工程指导文档.md)
 
 ---
 
