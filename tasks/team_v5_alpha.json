@@ -63,12 +63,14 @@
     "time": "~2 周",
     "gpu_mem": "~2-5GB（按变体）",
     "deps": ["V5A2", "V5A3"],
+    "status": "completed (2026-08-12)",
     "deliverables": [
-      "models/pe_tsnet_multimodal_v5.py（resnet18 变体）",
-      "models/pe_tsnet_yolo_v5.py（swin_yolo + vit_yolo）",
-      "models/pe_tsnet_detr_v5.py（DETR 变体）",
-      "models/pe_tsnet_patchtst_v5.py（PatchTST 变体）",
-      "models/__init__.py（v5 注册）"
+      "models/pe_tsnet_multimodal_v5.py（PETSNetMultimodalV5）✅",
+      "models/pe_tsnet_yolo_v5.py（SwinYOLOFPNV5 + ViTYOLOFPNV5 + ViTYOLOBackbone2DV5）✅",
+      "models/pe_tsnet_detr_v5.py（DETRStyleV5）✅",
+      "models/pe_tsnet_patchtst_v5.py（SwinYOLOFPNWithPatchTSTV5）✅",
+      "models/__init__.py（V5_MODEL_REGISTRY + create_v5_model）✅",
+      "tests/test_pe_tsnet_v5.py（18 项单元测试全过）✅"
     ]
   },
   {

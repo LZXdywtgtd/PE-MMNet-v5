@@ -6,6 +6,67 @@
 
 ---
 
+## [v5.0.4-alpha] - 2026-08-12
+
+### 新增（V5A4）
+
+5 个 v5-α 模型变体（输出头已替换为 SplineHead + GP 嵌入）：
+
+- `models/pe_tsnet_multimodal_v5.py`：`PETSNetMultimodalV5`
+  - ResNet-18 + CrossAttentionFusion + SplineHead + GP（默认启用）
+  - 输入：3 通道（温度场+应力场+热力图），符合 v5-α 设计
+- `models/pe_tsnet_yolo_v5.py`：
+  - `SwinYOLOFPNV5` — Swin-Tiny + YOLO-FPN
+  - `ViTYOLOFPNV5` — ViT-Small + YOLO-FPN
+  - `ViTYOLOBackbone2DV5` — 自适应输入通道版（v4 硬编码 2 通道 → v5-α 1/2/3/4 通道）
+- `models/pe_tsnet_detr_v5.py`：`DETRStyleV5` — ResNet-18 + Transformer Encoder-Decoder
+- `models/pe_tsnet_patchtst_v5.py`：`SwinYOLOFPNWithPatchTSTV5` — Swin + YOLO + PatchTST 1D
+- `models/__init__.py`：注册 `V5_MODEL_REGISTRY` + 工厂函数 `create_v5_model(variant, **kwargs)`
+- `tests/test_pe_tsnet_v5.py`：18 项单元测试
+
+### 关键改动
+
+| 维度 | v4 | v5-α |
+|---|---|---|
+| 输出 | 6 维向量 / YOLO 网格 6 维 / DETR queries 6 维 | bbox + 8-16 动态关键点（dict） |
+| 输出头 | MultiTaskHead / YOLOFPNHead / DETRHead | SplineHead（统一） |
+| 物理约束 | 单调性损失 | GP 嵌入模块（嵌入特征流）+ GP LML 正则 |
+| 输入通道 | 2（温度+应力） | 3（温度场+应力场+热力图） |
+| 训练接口 | `model(x_1d, x_2d) → Tensor` | `model(x_1d, x_2d) → dict` |
+
+### 设计决策
+
+**复用 v4 骨干，不重写**：
+- 5 个变体的 2D 骨干（ResNet-18 / Swin-Tiny / ViT-Small）和 1D 骨干（TemporalFeatureExtractor / PatchTST1D）全部沿用 v4
+- 仅替换输出头 + 可选 GP 模块插入融合后特征
+- 总代码量减半，单测覆盖完整数据流
+
+**DETR 的 top-1 query 选择**：
+- 沿用 v4 推理链：`DETRHead → (B, num_queries, 6) → 取最高 conf → query_proj → fusion`
+- v5-α 训练时也用同一 query（保持 train/eval 一致性，避免 query 选择 抖动）
+
+**YOLO 变体的全局池化**：
+- v4 输出 `(B, num_grids, 6)`（网格级预测）
+- v5-α 用 `mean(dim=1)` 池化到 `(B, 6)`（全局特征），再接 1D 拼接
+- 简化版聚合策略，避免在 v5-α 阶段处理 grid-to-kpts 的复杂映射
+
+### 测试
+
+- 单元测试合计：**72/72 PASSED**
+  * V5A1 patch_simulator: 12 项
+  * V5A2 SplineHead: 8 项 + GPModule: 10 项
+  * V5A3 ordered_kp_loss: 24 项
+  * V5A4 pe_tsnet_v5: **18 项**（新增：5 变体 forward + backward + 端到端 loss 反向）
+- 端到端验证：所有 5 个变体都能跑 `model → OrderedKeypointLoss → backward` 全链路
+
+### 已知问题新增
+
+- V5-015：GP 模块 batch 内归一化（V5-014）已在 v5-α 模型集成中保留，**未升级到 running stats**
+  → 训练/推理 stats 不一致风险持续存在
+  → 解决路径：V5A5 trainer 集成时改用 `(running_mean, running_std)`
+
+---
+
 ## [v5.0.3-alpha] - 2026-08-12
 
 ### 新增（V5A3）
