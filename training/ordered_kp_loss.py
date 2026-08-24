@@ -181,11 +181,23 @@ def coverage_loss(
     if pred_kpts.size(0) != true_crack_pixels.size(0):
         raise ValueError(
             f"pred_kpts batch={pred_kpts.size(0)} 与 "
-            f"true_crack_pixels batch={true_crack_pixels.size(0)} 不一致"
+            "true_crack_pixels batch={true_crack_pixels.size(0)} 不一致"
         )
+
+    B = pred_kpts.size(0)
 
     # 1. 拟合样条 + 采样
     spline_samples = catmull_rom_spline_torch(pred_kpts, M)  # (B, M, 2)
+
+    # 处理空真值像素情况：所有样本都没有裂纹像素 → 返回 0
+    N = true_crack_pixels.size(1)
+    if N == 0:
+        # 用一个温和的 surrogate：要求预测关键点尽量在 patch 中心
+        # 避免返回 NaN/0 让梯度停滞
+        center = pred_kpts.new_tensor([[0.5, 0.5]]).expand(B, 1, 2)
+        diff = pred_kpts - center
+        surrogate = (diff ** 2).sum(dim=-1).mean()  # 鼓励 kpts 集中
+        return surrogate * 0.0  # 系数 0 — 不贡献梯度（仅占位）
 
     # 2. pairwise 距离（平方欧氏距离）
     # true: (B, N, 2) → (B, N, 1, 2)

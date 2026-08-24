@@ -1,8 +1,98 @@
 # API 参考文档
 
-> PE-MMNet v4 公开 API | 版本 4.6.11
+> PE-MMNet v5-α 公开 API | 版本 5.0.5-alpha
 >
-> 所有签名通过 `inspect.signature()` 在 commit `aeaaba0` 验证。
+> 注：本文件 fork 自 v4.6.11 的同名文档；v5-α 新增 API 见 §0 顶部。
+>
+> 所有签名通过 `inspect.signature()` 在 commit `<latest>` 验证。
+
+---
+
+## 0. v5-α 新增 API（V5A1-V5A5）
+
+### 0.1 模型 (`models`)
+
+```python
+from models import (
+    SplineHead,                        # V5A2
+    GPModule,                          # V5A2
+    PETSNetMultimodalV5,               # V5A4
+    SwinYOLOFPNV5,                     # V5A4
+    ViTYOLOFPNV5,                      # V5A4
+    DETRStyleV5,                       # V5A4
+    SwinYOLOFPNWithPatchTSTV5,         # V5A4
+    V5_MODEL_REGISTRY,                 # 5 变体注册表
+    create_v5_model,                   # 工厂函数
+)
+
+# 用法
+model = create_v5_model("resnet18", image_channels=3, use_gp=True,
+                        max_kpts=16, min_kpts=8)
+out = model(x_1d, x_2d)
+# out = {"bbox": (B,4), "keypoints": (B,K,2),
+#        "validity": (B,K), "K": (B,), "gp_lml": scalar}
+```
+
+### 0.2 损失 (`training.ordered_kp_loss`)
+
+```python
+from training.ordered_kp_loss import (
+    catmull_rom_spline_torch,  # Catmull-Rom 三次样条（纯 PyTorch）
+    coverage_loss,             # 覆盖距离 loss（chamfer / hausdorff）
+    poisson_prior,             # 泊松先验（段长方差）
+    OrderedKeypointLoss,       # 组合 loss
+)
+
+# 用法
+loss_fn = OrderedKeypointLoss(
+    lambda_coverage=1.0, lambda_bbox=1.0,
+    lambda_gp=0.1, lambda_poisson=0.05,
+    coverage_mode="chamfer", M=200,
+)
+losses = loss_fn(pred_bbox, pred_kpts, true_bbox, true_crack_pixels,
+                 gp_module=model.gp_module)
+# losses = {"total", "coverage", "bbox", "gp", "poisson"}
+```
+
+### 0.3 数据 (`data.patch_dataset_v5`)
+
+```python
+from data.patch_dataset_v5 import PatchDatasetV5, collate_v5
+
+ds = PatchDatasetV5(
+    patch_size=256, n_samples=100,
+    min_kpts=8, max_kpts=16,
+    thermal_profile=None,  # 默认 11.7h 周期
+    crack_stress_threshold_MPa=50.0,
+)
+loader = DataLoader(ds, batch_size=4, collate_fn=collate_v5)
+# batch = {x_1d, x_2d, true_bbox, true_keypoints, keypoint_mask,
+#         true_crack_pixels, pixel_mask, metadata}
+```
+
+### 0.4 训练 (`training.trainer_v5`)
+
+```python
+from training.trainer_v5 import (
+    TrainerV5, CSVHistory,
+    save_checkpoint, load_checkpoint,
+    set_seed, get_device,
+)
+
+trainer = TrainerV5(
+    variant="resnet18", n_samples=100, patch_size=256,
+    batch_size=4, epochs=10, lr=1e-4,
+    min_kpts=8, max_kpts=16,
+    use_gp=True, use_aug=True,
+    log_dir="logs/training_history/run_train_v5",
+)
+final = trainer.fit(verbose=True, resume_from=None)
+# final = {"last_train_loss", "last_val_loss", "best_val_loss"}
+```
+
+---
+
+## 1. 数据模块 (`data.dataset_multimodal`)
 
 ---
 

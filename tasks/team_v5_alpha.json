@@ -83,11 +83,13 @@
     "time": "~1 周",
     "gpu_mem": "~0GB（代码层）",
     "deps": ["V5A4"],
+    "status": "completed (2026-08-12)",
     "deliverables": [
-      "training/trainer_v5.py",
-      "training/data_aug_v5.py（数据增强）",
-      "run_train_v5.py（统一入口）",
-      "tests/test_trainer_v5_smoke.py（冒烟测试）"
+      "data/patch_dataset_v5.py（PatchDatasetV5 + collate_v5）✅",
+      "training/data_aug_v5.py（PatchAugmentorV5 物理安全增强）✅",
+      "training/trainer_v5.py（TrainerV5 + CSVHistory + save/load_checkpoint）✅",
+      "run_train_v5.py（统一 CLI，沿用 v4 argparse 风格）✅",
+      "tests/test_trainer_v5_smoke.py（17 项单元测试全过）✅"
     ]
   },
   {

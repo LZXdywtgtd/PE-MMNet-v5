@@ -1,7 +1,7 @@
 {
   "_comment": "PE-MMNet v5-α 配置文件示例（真实配置请复制为 config.json，config.json 已被 .gitignore 排除）",
   "_how_to_use": "复制此文件为 config.json，修改 data_root 为你的数据路径即可",
-  "_version": "5.0.0-alpha",
+  "_version": "5.0.5-alpha",
   "_forked_from": "v4.6.12",
 
   "data_root": "D:\\项目路径\\参考输入",
@@ -30,6 +30,26 @@
       "stress_relaxation": true
     },
     "position_image_mode": "L3_disabled"
+  },
+
+  "_v5_trainer": {
+    "_comment": "V5A5 trainer 配置（run_train_v5.py CLI 参数）",
+    "lr": 1e-4,
+    "batch_size": 4,
+    "epochs": 150,
+    "use_gp": true,
+    "use_aug": true,
+    "pretrained_2d": false,
+    "coverage_mode": "chamfer",
+    "M": 200,
+    "lambda_coverage": 1.0,
+    "lambda_bbox": 1.0,
+    "lambda_gp": 0.1,
+    "lambda_poisson": 0.05,
+    "save_every": 1,
+    "seed": 42,
+    "crack_stress_threshold_MPa": 50.0,
+    "log_dir": "logs/training_history/run_train_v5"
   },
 
   "checkpoints_dir": "./checkpoints",

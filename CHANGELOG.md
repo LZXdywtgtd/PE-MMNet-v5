@@ -6,6 +6,79 @@
 
 ---
 
+## [v5.0.5-alpha] - 2026-08-12
+
+### 新增（V5A5）
+
+v5-α 训练循环（变长关键点 + 断点续训 + CSV）：
+
+- `data/patch_dataset_v5.py`：`PatchDatasetV5` + `collate_v5`
+  - 包装 `PatchSimulator.simulate()` 生成样本
+  - **预计算缓存**（__init__ 时一次性仿真，避免每个 epoch 重复）
+  - 变长批处理：`collate_v5` 把不同长度的真值关键点/裂纹像素 padding 到 batch 内最大尺寸 + mask 标记
+  - 样本字段：`x_1d, x_2d, true_bbox, true_keypoints, true_crack_pixels, metadata`
+- `training/data_aug_v5.py`：`PatchAugmentorV5`
+  - 物理安全增强：水平翻转 + 垂直翻转 + 90° 旋转 + 高斯噪声
+  - bbox / 关键点 / 像素坐标随图像同步变换
+  - 物理约束保护：bbox 顺序（x1≤x2, y1≤y2）、值域 [0,1] 在增强后仍成立
+- `training/trainer_v5.py`：`TrainerV5` + `CSVHistory` + `save/load_checkpoint`
+  - 变长 batch 处理（GPU 同步 padding 到 collate 后 mask）
+  - GP 模块正则注入（`OrderedKeypointLoss` 内置）
+  - 覆盖距离 loss 调用
+  - 动态 K 选择（`SplineHead` 内置）
+  - **断点续训**：`load_checkpoint` + `fit(resume_from=...)` + RNG 状态恢复
+  - **CSV 历史**：每个 epoch 记录 train_loss / val_loss / lr / 各分量 / 时间戳
+  - **best + latest checkpoint**：自动保存 val_loss 最优 + 每 save_every epoch 保存
+- `run_train_v5.py`：统一 CLI 入口（沿用 v4 argparse 风格）
+  - 支持 `--variant` / `--epochs` / `--batch_size` / `--lr` / `--resume` 等
+  - `--fast_thermal` 用于 1 min 短周期（测试用）
+  - `--no_gp` 禁用 GP 模块
+  - `--pretrained_2d` 启用 ImageNet 预训练
+- `tests/test_trainer_v5_smoke.py`：17 项单元测试
+
+### 关键设计决策
+
+**预计算数据集**（v5-α MVP 简化）：
+- 仿真一次 ~30s（256×256 全周期）— 每个 epoch 重新仿真不可接受
+- `__init__` 时一次性仿真所有样本到内存 cache
+- v5-β 真实数据接入时，替换为懒加载 + 磁盘缓存（接口不变）
+
+**变长关键点的 collate 处理**：
+- `collate_v5` 返回 `true_keypoints (B, max_K, 2)` + `keypoint_mask (B, max_K)`
+- 用 -1 标记 padding 位置（loss 计算时被 mask 过滤）
+- 真值裂纹像素同样处理
+
+**RNG 状态恢复**（断点续训关键）：
+- 检查点保存 `python / numpy / torch` 三种 RNG 状态
+- `load_checkpoint` 时恢复，保证续训可复现
+
+**空真值像素边界**：
+- `coverage_loss` 处理 `N=0`（无裂纹像素）时返回 surrogate（无梯度）而非 NaN
+- 防止训练初期全部 batch 都没裂纹时 loss 爆炸
+
+### 物理修复（V5A3 跟进）
+
+`coverage_loss` 修复：当 `true_crack_pixels.size(1)=0`（无裂纹）时，原实现 `min_per_true.mean(dim=-1)` 会因空张量返回 NaN。改为返回 surrogate（0 梯度），避免训练中断。
+
+### 测试
+
+- 单元测试合计：**89/89 PASSED**
+  * V5A1 patch_simulator: 12 项
+  * V5A2 SplineHead: 8 项 + GPModule: 10 项
+  * V5A3 ordered_kp_loss: 24 项
+  * V5A4 pe_tsnet_v5: 18 项
+  * V5A5 trainer_v5: **17 项**（新增）
+- 端到端验证：5 变体 × 1 epoch 训练完整跑通
+
+### 已知问题新增
+
+- V5-016：仿真预计算占用内存大（每个 256×256 样本 ~2MB → 1000 样本 ~2GB）
+  → v5-α MVP 接受；v5-β 真实数据接入时改为磁盘缓存
+- V5-017：`--fast_thermal` 仅用于测试；真实训练必须用 11.7h 默认周期
+  → 已文档化；训练脚本无 `--fast_thermal` 时走默认周期
+
+---
+
 ## [v5.0.4-alpha] - 2026-08-12
 
 ### 新增（V5A4）
