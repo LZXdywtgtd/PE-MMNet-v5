@@ -14,11 +14,21 @@ v5-α 主损失函数：
 
 4. **泊松先验**：鼓励关键点等弧长分布（段长方差最小化）
 
+5. **[v5-β 占位] 位置 6D loss**：Smooth L1（pose=[tx,ty,tz,rx,ry,rz] → 0）
+   - v5-α 默认权重 0.0（占位，不贡献梯度）
+   - 真值位姿缺失时返回 0（zero surrogate）
+
+6. **[v5-β 占位] UV 投影 loss**：MSE（3D→2D 重投影误差）
+   - v5-α 默认权重 0.0
+   - 真值 UV 缺失时返回 0
+
 总损失（架构设计 §3.5）：
     total = 1.0  * coverage
           + 1.0  * bbox
           + 0.1  * gp
           + 0.05 * poisson
+          + λ_pos6d * position_6d   (v5-β)
+          + λ_uv    * uv_projection (v5-β)
 
 样条选择说明
 -------------
@@ -33,6 +43,7 @@ v5-α 主损失函数：
 详见：
 - docs/v5_架构设计.md §3.1, §3.5
 - tasks/team_v5_alpha.json 中 V5A3
+- docs/v5_范围说明.md §11 v5-β 8 任务
 """
 
 from __future__ import annotations
@@ -254,20 +265,98 @@ def poisson_prior(pred_kpts: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
 
 
 # ============================================================
+#  v5-β 占位 loss
+# ============================================================
+
+def position_6d_loss(
+    pred_position_6d: torch.Tensor | None,
+    true_position_6d: torch.Tensor | None,
+) -> torch.Tensor:
+    """
+    位置 6D loss（v5-β 占位）
+
+    真值位姿缺失（None）→ 返回 0（占位）。
+    v5-α 当前默认权重 0.0，本函数实际不贡献梯度。
+
+    Args:
+        pred_position_6d: (B, 6) — [tx,ty,tz,rx,ry,rz] 或 None
+        true_position_6d: (B, 6) 或 None
+
+    Returns:
+        loss: 标量（Smooth L1），缺失则返回 0
+    """
+    if pred_position_6d is None or true_position_6d is None:
+        device = (
+            pred_position_6d.device
+            if pred_position_6d is not None
+            else torch.device("cpu")
+        )
+        return torch.tensor(0.0, device=device)
+    if pred_position_6d.shape != true_position_6d.shape:
+        raise ValueError(
+            f"pred_position_6d {tuple(pred_position_6d.shape)} 与 "
+            f"true_position_6d {tuple(true_position_6d.shape)} 形状不匹配"
+        )
+    return torch.nn.functional.smooth_l1_loss(pred_position_6d, true_position_6d)
+
+
+def uv_projection_loss(
+    pred_kpts: torch.Tensor,
+    pred_position_6d: torch.Tensor | None,
+    true_position_6d: torch.Tensor | None,
+    K_matrix: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """
+    UV 投影 loss（v5-β 占位）
+
+    思路（v5-β 启动后实现）：
+        1. 把预测关键点提升到陶瓷局部 3D（基于 UV 网格）
+        2. 用 pred_position_6d 做 6D 变换
+        3. 投影到相机平面（K_matrix 相机内参）
+        4. 与真值 2D 像素坐标比对 → MSE
+
+    v5-α 当前默认权重 0.0，本函数占位返回 0。
+
+    Args:
+        pred_kpts: (B, K, 2) — 预测的 2D 关键点
+        pred_position_6d: (B, 6) — 预测位姿
+        true_position_6d: (B, 6) — 真值位姿
+        K_matrix: (B, 3, 3) — 相机内参（None → 返回 0）
+
+    Returns:
+        loss: 标量，缺失则返回 0
+    """
+    if (
+        pred_position_6d is None
+        or true_position_6d is None
+        or K_matrix is None
+    ):
+        device = pred_kpts.device
+        return torch.tensor(0.0, device=device)
+    # v5-β 实现占位：返回 L2 距离（让接口可调用）
+    # 真值实现见 docs/v5_架构设计.md §8.4
+    diff = pred_position_6d - true_position_6d
+    return (diff * diff).mean()
+
+
+# ============================================================
 #  组合 loss（OrderedKeypointLoss）
 # ============================================================
 
 class OrderedKeypointLoss(nn.Module):
     """
-    组合 loss：覆盖距离 + bbox + GP 正则 + 泊松先验
+    组合 loss：覆盖距离 + bbox + GP 正则 + 泊松先验 + （v5-β 占位）
 
     总损失（架构设计 §3.5）：
         total = λ_cov * coverage
               + λ_bbox * smooth_l1_bbox
               + λ_gp * (-gp_module.log_marginal_likelihood)
               + λ_poisson * poisson_prior
+              + λ_pos6d * position_6d_loss   (v5-β)
+              + λ_uv    * uv_projection_loss (v5-β)
 
-    默认权重：λ_cov=1.0, λ_bbox=1.0, λ_gp=0.1, λ_poisson=0.05
+    默认权重（v5-α）：λ_cov=1.0, λ_bbox=1.0, λ_gp=0.1, λ_poisson=0.05
+    v5-β 默认权重：λ_pos6d=0.1, λ_uv=0.05（占位，暂未启用）
     """
 
     def __init__(
@@ -279,6 +368,9 @@ class OrderedKeypointLoss(nn.Module):
         coverage_mode: str = "chamfer",
         M: int = 200,
         bbox_beta: float = 1.0,
+        # ---- v5-β 占位权重 ----
+        lambda_position_6d: float = 0.0,
+        lambda_uv_projection: float = 0.0,
     ):
         """
         Args:
@@ -289,6 +381,8 @@ class OrderedKeypointLoss(nn.Module):
             coverage_mode: "chamfer" / "hausdorff"
             M: 样条采样点数
             bbox_beta: Smooth L1 的 β 参数
+            lambda_position_6d: 位置 6D loss 权重（v5-β 占位）
+            lambda_uv_projection: UV 投影 loss 权重（v5-β 占位）
         """
         super().__init__()
         if coverage_mode not in ("chamfer", "hausdorff"):
@@ -299,6 +393,8 @@ class OrderedKeypointLoss(nn.Module):
         self.lambda_bbox = lambda_bbox
         self.lambda_gp = lambda_gp
         self.lambda_poisson = lambda_poisson
+        self.lambda_position_6d = lambda_position_6d
+        self.lambda_uv_projection = lambda_uv_projection
         self.coverage_mode = coverage_mode
         self.M = M
 
@@ -311,6 +407,9 @@ class OrderedKeypointLoss(nn.Module):
         true_bbox: torch.Tensor,         # (B, 4)
         true_crack_pixels: torch.Tensor, # (B, N, 2)
         gp_module=None,                  # GPModule 实例（可选）
+        # ---- v5-β 占位 ----
+        true_position_6d: torch.Tensor | None = None,
+        pred_position_6d: torch.Tensor | None = None,
     ) -> dict:
         """
         计算总损失
@@ -321,6 +420,8 @@ class OrderedKeypointLoss(nn.Module):
             true_bbox: (B, 4) — 真值 bbox
             true_crack_pixels: (B, N, 2) — 真值裂纹像素 (y, x)
             gp_module: 可选 GPModule 实例
+            true_position_6d: (B, 6) 真值位姿（v5-β），None → 占位
+            pred_position_6d: (B, 6) 预测位姿（v5-β），None → 占位
 
         Returns:
             dict:
@@ -329,6 +430,8 @@ class OrderedKeypointLoss(nn.Module):
                 bbox: bbox Smooth L1 分量（detached）
                 gp: GP LML 分量（detached），gp_module=None 时为 0
                 poisson: 泊松先验分量（detached）
+                position_6d: 位置 6D 分量（detached，v5-β）
+                uv_projection: UV 投影分量（detached，v5-β）
         """
         # 1. 覆盖距离
         loss_cov = coverage_loss(
@@ -347,12 +450,22 @@ class OrderedKeypointLoss(nn.Module):
         # 4. 泊松先验
         loss_poisson = poisson_prior(pred_kpts)
 
+        # 5. [v5-β] 位置 6D loss
+        loss_pos6d = position_6d_loss(pred_position_6d, true_position_6d)
+
+        # 6. [v5-β] UV 投影 loss（K_matrix 暂为 None → 返回 0）
+        loss_uv = uv_projection_loss(
+            pred_kpts, pred_position_6d, true_position_6d, K_matrix=None,
+        )
+
         # 总损失
         total = (
             self.lambda_coverage * loss_cov
             + self.lambda_bbox * loss_bbox
             + self.lambda_gp * loss_gp
             + self.lambda_poisson * loss_poisson
+            + self.lambda_position_6d * loss_pos6d
+            + self.lambda_uv_projection * loss_uv
         )
 
         return {
@@ -361,6 +474,8 @@ class OrderedKeypointLoss(nn.Module):
             "bbox": loss_bbox.detach(),
             "gp": loss_gp.detach(),
             "poisson": loss_poisson.detach(),
+            "position_6d": loss_pos6d.detach(),
+            "uv_projection": loss_uv.detach(),
         }
 
 

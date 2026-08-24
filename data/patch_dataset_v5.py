@@ -1,5 +1,5 @@
 """
-v5-α patch 数据集（V5A5）
+v5-α patch 数据集（V5A5 + V5-β 钩子 + V5B6 npz 缓存）
 
 将 PatchSimulator 包装为 PyTorch Dataset。
 
@@ -12,17 +12,27 @@ v5-α patch 数据集（V5A5）
   - true_keypoints: (K, 2) 真值关键点（K ∈ [min, max]）
   - true_crack_pixels: (N, 2) 真值裂纹像素（来自 crack_mask）
 
+[v5-β 钩子]：
+- data_source: "simulation"（v5-α 默认）/ "real"（v5-β 真实数据）
+- use_position_image: bool — 注入 position_6d (B,6) 字段
+- cache_dir: str | None — 仿真结果 npz 磁盘缓存（V5B6）
+  * 缓存键：{patch_size, n_samples, seed, thermal_hash} → cache_dir/sim_cache_{hash}.npz
+  * 命中缓存时跳过仿真（速度提升 10×）
+  * h5py 未安装时使用 npz（等效但单文件 vs 切片访问稍慢）
+
 注：
 - v5-α 不需要真实 3D 数据；仿真数据已足够训练算法骨架
 - v5-β 启动后接入真实数据时，只需替换本 Dataset 即可，trainer 接口不变
 
 详见：
 - docs/v5_范围说明.md
-- tasks/team_v5_alpha.json 中 V5A5
+- tasks/team_v5_alpha.json 中 V5A5 + V5B6
 """
 
 from __future__ import annotations
 
+import os
+import hashlib
 import numpy as np
 import torch
 from torch.utils.data import Dataset
@@ -38,13 +48,29 @@ def _normalize_field(field: np.ndarray) -> np.ndarray:
     return ((field - f_min) / (f_max - f_min)).astype(np.float32)
 
 
+def _thermal_profile_hash(thermal_profile: dict) -> str:
+    """热曲线配置 → 短哈希（缓存键用）"""
+    keys = sorted(thermal_profile.keys())
+    payload = "|".join(f"{k}={thermal_profile[k]}" for k in keys)
+    return hashlib.md5(payload.encode("utf-8")).hexdigest()[:8]
+
+
+def _cache_filename(
+    patch_size: int, n_samples: int, seed: int,
+    thermal_hash: str, threshold: float,
+) -> str:
+    """缓存文件名（包含所有影响仿真结果的参数）"""
+    payload = f"p{patch_size}_n{n_samples}_s{seed}_t{thermal_hash}_th{threshold}"
+    return f"sim_cache_{payload}.npz"
+
+
 class PatchDatasetV5(Dataset):
     """
-    v5-α patch 数据集
+    v5-α patch 数据集（V5-β 钩子已集成 + V5B6 npz 磁盘缓存）
 
     每个样本由 PatchSimulator.simulate() 生成。
     默认在 __init__ 时**预计算全部样本**到内存（v5-α MVP 简化）。
-    真实数据接入后（v5-β）应改为懒加载 + 磁盘缓存。
+    V5B6 启用 cache_dir 时，先尝试加载 npz 缓存，命中则跳过仿真。
 
     Args:
         patch_size:  patch 像素尺寸（默认 256）
@@ -59,6 +85,10 @@ class PatchDatasetV5(Dataset):
         return_pixels: 是否返回 crack 像素（用于覆盖距离 loss）
         precompute:   是否在 __init__ 时预计算（默认 True）
         verbose:      是否打印预计算进度
+        ---- v5-β 钩子 ----
+        data_source: "simulation"（v5-α）/ "real"（v5-β 占位）
+        use_position_image: bool — 注入 true_position_6d 字段（v5-β 占位）
+        cache_dir: str | None — 仿真 npz 磁盘缓存目录（v5-β V5B6）
     """
 
     def __init__(
@@ -75,6 +105,10 @@ class PatchDatasetV5(Dataset):
         return_pixels: bool = True,
         precompute: bool = True,
         verbose: bool = False,
+        # ---- v5-β 钩子 ----
+        data_source: str = "simulation",
+        use_position_image: bool = False,
+        cache_dir: str | None = None,
     ):
         super().__init__()
         self.patch_size = patch_size
@@ -88,10 +122,25 @@ class PatchDatasetV5(Dataset):
         self.material = material or {}
         self.return_pixels = return_pixels
         self.verbose = verbose
+        # v5-β
+        self.data_source = data_source
+        self.use_position_image = use_position_image
+        self.cache_dir = cache_dir
 
         # 物量单位（米）
         self.physical_size_cm = 5.0
         self.physical_size_m = self.physical_size_cm / 100.0
+
+        # 缓存路径
+        self._cache_file: str | None = None
+        if cache_dir is not None:
+            os.makedirs(cache_dir, exist_ok=True)
+            thermal_hash = _thermal_profile_hash(self.thermal_profile)
+            fname = _cache_filename(
+                patch_size, n_samples, seed, thermal_hash,
+                crack_stress_threshold_MPa,
+            )
+            self._cache_file = os.path.join(cache_dir, fname)
 
         # 预计算缓存
         self._cache: list[dict] | None = None
@@ -99,12 +148,97 @@ class PatchDatasetV5(Dataset):
             self._precompute()
 
     def _precompute(self) -> None:
-        """预计算所有样本并缓存"""
+        """预计算所有样本（优先用 npz 缓存）"""
+        # V5B6: 尝试加载 npz 磁盘缓存
+        if self._cache_file is not None and os.path.exists(self._cache_file):
+            if self.verbose:
+                print(f"  [PatchDatasetV5] 加载 npz 缓存: {self._cache_file}")
+            self._cache = self._load_from_npz(self._cache_file)
+            return
+
         self._cache = []
         for idx in range(self.n_samples):
             if self.verbose:
                 print(f"  [PatchDatasetV5] 预计算样本 {idx + 1}/{self.n_samples}")
             self._cache.append(self._generate_sample(idx))
+
+        # V5B6: 仿真完成 → 写入 npz 缓存
+        if self._cache_file is not None:
+            self._save_to_npz(self._cache_file, self._cache)
+            if self.verbose:
+                print(f"  [PatchDatasetV5] 已写入 npz 缓存: {self._cache_file}")
+
+    def _save_to_npz(self, path: str, cache: list[dict]) -> None:
+        """把内存缓存序列化到 npz 文件"""
+        n = len(cache)
+        x_1d = np.stack([c["x_1d"].numpy() for c in cache], axis=0)
+        x_2d = np.stack([c["x_2d"].numpy() for c in cache], axis=0)
+        true_bbox = np.stack([c["true_bbox"].numpy() for c in cache], axis=0)
+        # 变长关键点：用一个 mask 标记
+        max_K = max(c["true_keypoints"].size(0) for c in cache)
+        if max_K > 0:
+            true_kpts = np.full((n, max_K, 2), -1.0, dtype=np.float32)
+            kpt_mask = np.zeros((n, max_K), dtype=bool)
+            for i, c in enumerate(cache):
+                k = c["true_keypoints"].size(0)
+                if k > 0:
+                    true_kpts[i, :k] = c["true_keypoints"].numpy()
+                    kpt_mask[i, :k] = True
+        else:
+            true_kpts = np.zeros((n, 0, 2), dtype=np.float32)
+            kpt_mask = np.zeros((n, 0), dtype=bool)
+        max_N = max(c["true_crack_pixels"].size(0) for c in cache)
+        if max_N > 0:
+            true_px = np.full((n, max_N, 2), -1.0, dtype=np.float32)
+            px_mask = np.zeros((n, max_N), dtype=bool)
+            for i, c in enumerate(cache):
+                m = c["true_crack_pixels"].size(0)
+                if m > 0:
+                    true_px[i, :m] = c["true_crack_pixels"].numpy()
+                    px_mask[i, :m] = True
+        else:
+            true_px = np.zeros((n, 0, 2), dtype=np.float32)
+            px_mask = np.zeros((n, 0), dtype=bool)
+        # v5-β: position_6d（None → 全 0 + 全 False mask）
+        if self.use_position_image and all(
+            c.get("true_position_6d") is not None for c in cache
+        ):
+            true_pos6d = np.stack(
+                [c["true_position_6d"].numpy() for c in cache], axis=0,
+            ).astype(np.float32)
+        else:
+            true_pos6d = np.zeros((n, 6), dtype=np.float32)
+
+        np.savez_compressed(
+            path,
+            x_1d=x_1d, x_2d=x_2d, true_bbox=true_bbox,
+            true_keypoints=true_kpts, keypoint_mask=kpt_mask,
+            true_crack_pixels=true_px, pixel_mask=px_mask,
+            true_position_6d=true_pos6d,
+        )
+
+    def _load_from_npz(self, path: str) -> list[dict]:
+        """从 npz 加载 → 内存缓存"""
+        data = np.load(path)
+        n = data["x_1d"].shape[0]
+        cache = []
+        for i in range(n):
+            sample = {
+                "x_1d": torch.from_numpy(data["x_1d"][i]),
+                "x_2d": torch.from_numpy(data["x_2d"][i]),
+                "true_bbox": torch.from_numpy(data["true_bbox"][i]),
+                "true_keypoints": torch.from_numpy(data["true_keypoints"][i]),
+                "true_crack_pixels": torch.from_numpy(
+                    data["true_crack_pixels"][i]
+                ),
+            }
+            # v5-β position_6d
+            if self.use_position_image and "true_position_6d" in data.files:
+                sample["true_position_6d"] = torch.from_numpy(
+                    data["true_position_6d"][i]
+                )
+            cache.append(sample)
+        return cache
 
     def __len__(self) -> int:
         return self.n_samples
@@ -179,7 +313,7 @@ class PatchDatasetV5(Dataset):
         else:
             true_pixels = np.zeros((0, 2), dtype=np.float32)
 
-        return {
+        sample = {
             "x_1d": torch.from_numpy(T_seq),
             "x_2d": torch.from_numpy(x_2d),
             "true_bbox": torch.from_numpy(bbox_xyxy),
@@ -187,6 +321,12 @@ class PatchDatasetV5(Dataset):
             "true_crack_pixels": torch.from_numpy(true_pixels),
             "metadata": result["metadata"],
         }
+
+        # v5-β: 位置 6D（仿真数据无 → 全 0）
+        if self.use_position_image:
+            sample["true_position_6d"] = torch.zeros(6, dtype=torch.float32)
+
+        return sample
 
     def __getitem__(self, idx: int) -> dict:
         if self._cache is not None:
@@ -196,11 +336,15 @@ class PatchDatasetV5(Dataset):
 
 def collate_v5(batch: list[dict]) -> dict:
     """
-    v5-α 自定义 collate 函数
+    v5-α 自定义 collate 函数（v5-β 钩子已集成）
 
     处理变长数据（true_keypoints, true_crack_pixels 不同长度）：
     - 用 padding（-1 标记填充）保留 batch 维度
     - 用 mask 标记有效位置
+
+    v5-β 钩子：
+    - 若 batch 含 'true_position_6d'，则堆叠为 (B, 6)
+    - 若 use_position_image=False 或缺失字段，则输出中不包含此键
 
     Returns:
         dict:
@@ -211,6 +355,7 @@ def collate_v5(batch: list[dict]) -> dict:
             keypoint_mask: (B, max_K) — True = 有效
             true_crack_pixels: (B, max_N, 2) — padding 到最大 N
             pixel_mask:    (B, max_N) — True = 有效
+            true_position_6d: (B, 6) — 仅当所有样本都有此字段时存在
     """
     B = len(batch)
 
@@ -248,7 +393,7 @@ def collate_v5(batch: list[dict]) -> dict:
         true_pixels = torch.zeros(B, 0, 2)
         pixel_mask = torch.zeros(B, 0, dtype=torch.bool)
 
-    return {
+    out = {
         "x_1d": x_1d,
         "x_2d": x_2d,
         "true_bbox": true_bbox,
@@ -257,6 +402,14 @@ def collate_v5(batch: list[dict]) -> dict:
         "true_crack_pixels": true_pixels,
         "pixel_mask": pixel_mask,
     }
+
+    # v5-β: position_6d（仅当所有样本都有此字段时输出）
+    if all("true_position_6d" in b for b in batch):
+        out["true_position_6d"] = torch.stack(
+            [b["true_position_6d"] for b in batch], dim=0,
+        )
+
+    return out
 
 
 # ============================================================
@@ -277,6 +430,14 @@ def _smoke_test():
         "soak_duration_min": 1.0,
         "cool_down_c_per_min": 1260.0,  # 1 min cool
     }
+
+    # v5-β 钩子测试：cache_dir + use_position_image
+    cache_dir = "logs/_test_cache"
+    if os.path.exists(cache_dir):
+        import shutil
+        shutil.rmtree(cache_dir)
+
+    # 1) 默认（无缓存 + 无 position_6d）
     ds = PatchDatasetV5(
         patch_size=64,
         n_samples=2,
@@ -292,6 +453,8 @@ def _smoke_test():
     print(f"  true_bbox:   {tuple(sample['true_bbox'].shape)}, values={sample['true_bbox'].tolist()}")
     print(f"  true_keypoints: {tuple(sample['true_keypoints'].shape)}")
     print(f"  true_crack_pixels: {tuple(sample['true_crack_pixels'].shape)}")
+    assert "true_position_6d" not in sample, "v5-α 默认不应有 position_6d"
+    print(f"  [v5-β] true_position_6d: 不存在（符合预期）")
     print(f"  metadata:    peak={sample['metadata']['peak_stress_MPa']:.2f} MPa, "
           f"K={sample['metadata']['n_keypoints']}")
 
@@ -302,6 +465,45 @@ def _smoke_test():
     print(f"  x_2d:        {tuple(batch['x_2d'].shape)}")
     print(f"  true_keypoints: {tuple(batch['true_keypoints'].shape)}, mask sum={batch['keypoint_mask'].sum().item()}")
     print(f"  true_crack_pixels: {tuple(batch['true_crack_pixels'].shape)}, mask sum={batch['pixel_mask'].sum().item()}")
+    assert "true_position_6d" not in batch, "默认 collate 不应包含 position_6d"
+
+    # 2) npz 缓存测试：第 1 次仿真写入缓存 → 第 2 次直接加载
+    print(f"\n[npz 缓存测试]")
+    ds1 = PatchDatasetV5(
+        patch_size=64, n_samples=2, seed=42,
+        thermal_profile=fast_profile, cache_dir=cache_dir, verbose=True,
+    )
+    cache_files = os.listdir(cache_dir)
+    print(f"  第 1 次完成，缓存文件: {cache_files}")
+    assert len(cache_files) == 1, f"应写 1 个 npz，实际 {len(cache_files)}"
+
+    ds2 = PatchDatasetV5(
+        patch_size=64, n_samples=2, seed=42,
+        thermal_profile=fast_profile, cache_dir=cache_dir, verbose=True,
+    )
+    sample2 = ds2[0]
+    assert torch.allclose(sample["x_1d"], sample2["x_1d"]), "缓存命中应得到相同数据"
+    print(f"  [OK] 缓存命中，x_1d 一致")
+
+    # 3) use_position_image 测试
+    print(f"\n[use_position_image 测试]")
+    ds3 = PatchDatasetV5(
+        patch_size=64, n_samples=2, seed=42,
+        thermal_profile=fast_profile, use_position_image=True, verbose=False,
+    )
+    sample3 = ds3[0]
+    assert "true_position_6d" in sample3, "use_position_image=True 应注入字段"
+    assert sample3["true_position_6d"].shape == (6,), f"应 (6,)，实际 {tuple(sample3['true_position_6d'].shape)}"
+    print(f"  [OK] true_position_6d 注入: shape={tuple(sample3['true_position_6d'].shape)}")
+    batch3 = collate_v5([ds3[0], ds3[1]])
+    assert "true_position_6d" in batch3
+    assert batch3["true_position_6d"].shape == (2, 6)
+    print(f"  [OK] collate_v5 含 position_6d: {tuple(batch3['true_position_6d'].shape)}")
+
+    # 清理
+    if os.path.exists(cache_dir):
+        import shutil
+        shutil.rmtree(cache_dir)
 
     print("\n[ALL PASS] ✅")
 

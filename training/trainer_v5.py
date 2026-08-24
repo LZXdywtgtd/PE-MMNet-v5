@@ -1,5 +1,5 @@
 """
-v5-α 训练循环（V5A5）
+v5-α 训练循环（V5A5 + V5-β 钩子）
 
 TrainerV5：变长关键点训练循环，断点续训，CSV 历史，GPU 自适应。
 
@@ -12,9 +12,16 @@ TrainerV5：变长关键点训练循环，断点续训，CSV 历史，GPU 自适
 6. CSV 训练历史
 7. 评估模式（coverage/bbox/KP IoU）
 
+[v5-β 钩子]（v5-α 全部默认 False/None，不影响当前行为）：
+- data_source: "simulation" / "real" —— 数据源切换（V5B6 接入真实数据）
+- use_position_image: bool —— 是否注入位置图像分支（V5B4）
+- use_uv_inverse: bool —— 是否注入 UV 逆映射 head（V5B1）
+- cache_dir: str | None —— 仿真 npz 缓存目录（V5B6 磁盘缓存）
+
 详见：
-- docs/v5_架构设计.md §4.5
+- docs/v5_架构设计.md §4.5 + §8 v5-β 架构
 - tasks/team_v5_alpha.json 中 V5A5
+- docs/v5_范围说明.md §11 v5-β 8 任务
 """
 
 from __future__ import annotations
@@ -69,6 +76,7 @@ class CSVHistory:
         self.fieldnames = [
             "epoch", "train_loss", "train_coverage", "train_bbox",
             "train_gp", "train_poisson",
+            "train_position_6d", "train_uv_projection",  # v5-β 钩子列
             "val_loss", "val_coverage",
             "lr", "epoch_time_s", "timestamp",
         ]
@@ -149,7 +157,7 @@ def load_checkpoint(
 
 class TrainerV5:
     """
-    v5-α 训练器
+    v5-α 训练器（V5-β 钩子已预留）
 
     Args:
         variant: 模型变体（"resnet18" / "swin_yolo" / "vit_yolo" / "detr" / "swin_yolo_patchtst"）
@@ -170,6 +178,13 @@ class TrainerV5:
         crack_stress_threshold_MPa: 裂纹阈值（默认 50.0）
         save_every: 每 N epoch 保存一次 checkpoint
         model_kwargs: 传给 create_v5_model 的额外 kwargs
+        ---- v5-β 钩子（默认 None/False，v5-α 完全不启用） ----
+        data_source: "simulation"（v5-α 默认）/ "real"（v5-β 真实数据）
+        cache_dir: 仿真 npz 磁盘缓存目录（v5-β V5B6）
+        use_position_image: 是否注入位置图像分支（v5-β V5B4）
+        use_uv_inverse: 是否注入 UV 逆映射（v5-β V5B1）
+        lambda_position_6d: 位置 6D loss 权重（v5-β）
+        lambda_uv_projection: UV 投影 loss 权重（v5-β）
     """
 
     def __init__(
@@ -196,6 +211,13 @@ class TrainerV5:
         crack_stress_threshold_MPa: float = 50.0,
         save_every: int = 1,
         model_kwargs: dict | None = None,
+        # ---- v5-β 钩子（默认禁用） ----
+        data_source: str = "simulation",
+        cache_dir: str | None = None,
+        use_position_image: bool = False,
+        use_uv_inverse: bool = False,
+        lambda_position_6d: float = 0.0,
+        lambda_uv_projection: float = 0.0,
     ):
         self.variant = variant
         self.n_samples = n_samples
@@ -213,6 +235,36 @@ class TrainerV5:
         self.save_every = save_every
         self.model_kwargs = model_kwargs or {}
 
+        # ---- v5-β 钩子 ----
+        self.data_source = data_source
+        self.cache_dir = cache_dir
+        self.use_position_image = use_position_image
+        self.use_uv_inverse = use_uv_inverse
+        self.lambda_position_6d = lambda_position_6d
+        self.lambda_uv_projection = lambda_uv_projection
+
+        # V5-β 钩子守卫：仅记录意图，不抛错（让 v5-α 用户无感）
+        if data_source not in ("simulation", "real"):
+            raise ValueError(
+                f"data_source 应为 'simulation' / 'real'，实际 {data_source!r}"
+            )
+        if use_position_image and data_source != "real":
+            import warnings
+            warnings.warn(
+                "use_position_image=True 但 data_source='simulation'。"
+                "位置图像分支将注入全零 + mask（v5-α 仿真数据无 6D pose 信息）。",
+                UserWarning,
+                stacklevel=2,
+            )
+        if use_uv_inverse and data_source != "real":
+            import warnings
+            warnings.warn(
+                "use_uv_inverse=True 但 data_source='simulation'。"
+                "UV 逆映射将退化为 identity（v5-α 无 UV 网格）。",
+                UserWarning,
+                stacklevel=2,
+            )
+
         os.makedirs(log_dir, exist_ok=True)
         os.makedirs(os.path.join(log_dir, "checkpoints"), exist_ok=True)
 
@@ -225,8 +277,8 @@ class TrainerV5:
         # 随机种子
         set_seed(seed)
 
-        # 数据集（（预计算到 cache）
-        self.train_ds = PatchDatasetV5(
+        # 数据集（v5-β: 支持 npz 缓存 + position_6d 字段）
+        dataset_kwargs = dict(
             patch_size=patch_size,
             n_samples=n_samples,
             min_kpts=min_kpts,
@@ -234,16 +286,14 @@ class TrainerV5:
             seed=seed,
             thermal_profile=thermal_profile,
             crack_stress_threshold_MPa=crack_stress_threshold_MPa,
+            data_source=data_source,
+            use_position_image=use_position_image,
+            cache_dir=cache_dir,
         )
+        self.train_ds = PatchDatasetV5(**dataset_kwargs)
         # 验证集：同 seed 偏移（数据不同）
         self.val_ds = PatchDatasetV5(
-            patch_size=patch_size,
-            n_samples=max(2, n_samples // 5),
-            min_kpts=min_kpts,
-            max_kpts=max_kpts,
-            seed=seed + 10000,
-            thermal_profile=thermal_profile,
-            crack_stress_threshold_MPa=crack_stress_threshold_MPa,
+            **dict(dataset_kwargs, n_samples=max(2, n_samples // 5), seed=seed + 10000),
         )
 
         # 增强器
@@ -275,7 +325,7 @@ class TrainerV5:
         }
         self.model = create_v5_model(variant, **build_kwargs).to(self.device)
 
-        # 损失
+        # 损失（v5-β: 增加 position_6d_loss / uv_projection_loss 占位）
         self.loss_fn = OrderedKeypointLoss(
             lambda_coverage=lambda_coverage,
             lambda_bbox=lambda_bbox,
@@ -283,6 +333,8 @@ class TrainerV5:
             lambda_poisson=lambda_poisson,
             coverage_mode=coverage_mode,
             M=M,
+            lambda_position_6d=lambda_position_6d,
+            lambda_uv_projection=lambda_uv_projection,
         ).to(self.device)
 
         # 优化器
@@ -305,6 +357,10 @@ class TrainerV5:
         true_pixels = batch["true_crack_pixels"].to(self.device)
         pixel_mask = batch["pixel_mask"].to(self.device)
         kpt_mask = batch["keypoint_mask"].to(self.device)
+        # v5-β 钩子：position_6d（若存在；否则 None）
+        true_position_6d = None
+        if self.use_position_image and "true_position_6d" in batch:
+            true_position_6d = batch["true_position_6d"].to(self.device)
 
         # 数据增强（先转 CPU）
         if self.augmentor is not None:
@@ -355,6 +411,8 @@ class TrainerV5:
             true_bbox=true_bbox,
             true_crack_pixels=true_pixels,
             gp_module=gp_module,
+            true_position_6d=true_position_6d,
+            pred_position_6d=out.get("position_6d"),
         )
         losses["total"].backward()
         self.optimizer.step()
@@ -365,6 +423,8 @@ class TrainerV5:
             "bbox": losses["bbox"].item(),
             "gp": losses["gp"].item(),
             "poisson": losses["poisson"].item(),
+            "position_6d": losses["position_6d"].item() if losses["position_6d"].numel() else 0.0,
+            "uv_projection": losses["uv_projection"].item() if losses["uv_projection"].numel() else 0.0,
         }
 
     @torch.no_grad()
@@ -377,12 +437,18 @@ class TrainerV5:
 
         out = self.model(x_1d, x_2d)
         gp_module = getattr(self.model, "gp_module", None)
+        # v5-β 钩子
+        true_position_6d = None
+        if self.use_position_image and "true_position_6d" in batch:
+            true_position_6d = batch["true_position_6d"].to(self.device)
         losses = self.loss_fn(
             pred_bbox=out["bbox"],
             pred_kpts=out["keypoints"],
             true_bbox=true_bbox,
             true_crack_pixels=true_pixels,
             gp_module=gp_module,
+            true_position_6d=true_position_6d,
+            pred_position_6d=out.get("position_6d"),
         )
         return {
             "loss": losses["total"].item(),
@@ -392,7 +458,11 @@ class TrainerV5:
     def train_epoch(self, epoch: int) -> dict:
         """训练一个 epoch"""
         self.model.train()
-        agg = {"loss": 0.0, "coverage": 0.0, "bbox": 0.0, "gp": 0.0, "poisson": 0.0}
+        agg = {
+            "loss": 0.0, "coverage": 0.0, "bbox": 0.0,
+            "gp": 0.0, "poisson": 0.0,
+            "position_6d": 0.0, "uv_projection": 0.0,
+        }
         n = 0
         for batch in self.train_loader:
             step = self._train_step(batch)
@@ -458,6 +528,8 @@ class TrainerV5:
                 "train_bbox": f"{train_metrics['bbox']:.6f}",
                 "train_gp": f"{train_metrics['gp']:.6f}",
                 "train_poisson": f"{train_metrics['poisson']:.6f}",
+                "train_position_6d": f"{train_metrics.get('position_6d', 0.0):.6f}",
+                "train_uv_projection": f"{train_metrics.get('uv_projection', 0.0):.6f}",
                 "val_loss": f"{val_metrics['loss']:.6f}",
                 "val_coverage": f"{val_metrics['coverage']:.6f}",
                 "lr": f"{self.optimizer.param_groups[0]['lr']:.2e}",
