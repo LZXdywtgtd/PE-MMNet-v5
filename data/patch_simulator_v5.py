@@ -379,8 +379,18 @@ class PatchSimulator:
             mask, iterations=2, border_value=1
         ).astype(np.uint8)
 
-        # 5. 形态学细化（可选）
-        # skeleton = morphology.skeletonize(mask > 0)
+        # 5. 二次保留最大连通域（V5-028）：border_value=1 的 dilation 把
+        # 整条边界置 True、erosion 仅四角存活 → 产生 4 个 ≤4px 角落伪
+        # 分量（σ<th 位置）。危害：GT 像素混入假裂纹 + bbox 被撑成全帧
+        # （面积 p50 0.98，bbox 监督退化为常数）+ kpt_direct 合法停靠角点。
+        # 闭运算只加像素不减，主分量必保留；贴边真裂纹本就是最大分量
+        # （V5-024 场景），此步不影响。
+        labeled2, n_features2 = ndimage.label(mask)
+        if n_features2 > 1:
+            sizes2 = ndimage.sum(
+                mask, labeled2, range(1, n_features2 + 1)
+            )
+            mask = (labeled2 == int(np.argmax(sizes2)) + 1).astype(np.uint8)
 
         return mask * 255
 

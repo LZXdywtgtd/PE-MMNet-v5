@@ -8,6 +8,35 @@
 
 ---
 
+## [v5.0.12-alpha] - 2026-09-29
+
+### V5-028：闭运算四角伪分量修复（GT 口径变更，全量缓存重生成+重训）
+
+#### 修复
+
+- **data/patch_simulator_v5.py `_extract_crack_mask`**
+  - V5-024 的 `border_value=1` 引入回归：闭运算 dilation 把整条边界置
+    True、erosion 仅四角存活 → 4 个 ≤4px 角落伪分量（σ<th 位置）。
+  - 危害链（判据 4 败 ratio 4.24 的根因）：GT 混假裂纹 → bbox 撑成
+    全帧（p50 面积 0.98，监督退化）→ kpt_direct 68% 点合法停靠卫星 →
+    样条跳线 → 样条→px 方向崩坏
+  - 修复：闭运算后二次保留最大连通域。回归 **106/106 通过**；抽检
+    5 样本单连通域、bbox 面积恢复 0.03~0.12
+
+#### 新增
+
+- `_eval_criteria34.py`：判据 3/4 严格版验证脚本（跨输入方差 +
+  chamfer vs 真kpts 上界比）
+- V5-029 条目：validity 头从未被监督（v5-α 接受，推理 top-K 不可信，
+  当前链路不触发）
+
+#### 变更
+
+- GT 口径变更：D' 全量缓存（1200 样本）重生成，150ep 重训；
+  修复前训练产物备份于 `logs/training_history/_v5028_pre_regen_bak/`
+
+---
+
 ## [v5.0.11-alpha] - 2026-09-29
 
 ### V5-027：_extract_keypoints 碎片化骨架 K 上限违反修复 + D' 缓存重生成
