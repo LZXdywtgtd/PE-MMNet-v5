@@ -437,8 +437,17 @@ class PatchSimulator:
             path = list(zip(ys, xs))
 
         if len(path) < 2:
+            # V5-027：端点跨骨架连通域（碎片化骨架）时 BFS 不可达。
+            # 原实现在此返回全部骨架点（无 K 上限，实测可达 182 点，
+            # 违反模型 max_kpts=16 契约）。修复：在最大连通域内重追路径，
+            # 统一走等弧长采样保证 K ∈ [min_kpts, max_kpts]。
+            path = self._trace_largest_component(skeleton)
+
+        if len(path) < 2:
+            # 最大域也追不出路径（罕见，如孤立点域）：截断保 K 契约
+            pts = np.column_stack([ys, xs])[: self.max_keypoints]
             return (
-                np.column_stack([ys, xs]).astype(np.float32),
+                pts.astype(np.float32),
                 self._mask_to_bbox(crack_mask),
             )
 
@@ -465,6 +474,30 @@ class PatchSimulator:
 
         ys, xs = np.where(neighbor_count == 1)
         return [(int(y), int(x)) for y, x in zip(ys, xs)]
+
+    @staticmethod
+    def _trace_largest_component(skeleton: np.ndarray) -> list[tuple[int, int]]:
+        """最大骨架连通域内的端点间路径（V5-027 退化分支专用）。
+
+        8 连通标注（与 _trace_path 邻域一致）；同域内 BFS 必达，
+        不复现跨连通域返回空路径的问题。闭环域（无端点）返回域内全部点。
+        """
+        from scipy import ndimage
+
+        kernel = np.ones((3, 3), dtype=int)
+        labels, n = ndimage.label(skeleton, structure=kernel)
+        if n == 0:
+            return []
+        largest = int(np.argmax(np.bincount(labels.ravel())[1:])) + 1
+        comp = labels == largest
+        ys, xs = np.where(comp)
+        pts = [(int(y), int(x)) for y, x in zip(ys, xs)]
+        if len(pts) < 2:
+            return pts
+        endpoints = PatchSimulator._find_endpoints(comp.astype(np.uint8))
+        if len(endpoints) >= 2:
+            return PatchSimulator._trace_path(comp, endpoints[0], endpoints[1])
+        return pts
 
     @staticmethod
     def _trace_path(

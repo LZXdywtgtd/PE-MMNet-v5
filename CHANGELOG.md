@@ -8,6 +8,36 @@
 
 ---
 
+## [v5.0.11-alpha] - 2026-09-29
+
+### V5-027：_extract_keypoints 碎片化骨架 K 上限违反修复 + D' 缓存重生成
+
+#### 修复
+
+- **data/patch_simulator_v5.py `_extract_keypoints`**
+  - 历史缺陷：骨架碎片化（多连通域）时两端点跨域，`_trace_path` BFS
+    返回 `[]`，`len(path)<2` 早退分支返回**全部骨架点**——绕过
+    K∈[min_kpts, max_kpts] 契约（D' 全量实测 63/1200 样本 kpts 74~182，
+    模型 SplineHead 上限 16）
+  - 修复：该分支改调新增的 `_trace_largest_component`（8 连通最大域内
+    重追路径）→ 统一等弧长采样，K 恢复有界；好样本执行路径不变（逐位
+    兼容），回归 **106/106 通过**（102 原有 + 4 新增
+    `tests/test_v5027_kpts_regression.py`）
+- **缓存更正**：CHANGELOG v5.0.10-alpha 与 V5-026 的 val seed=524242
+  系笔误，实际为 **434242**（trainer 硬编码 val seed = train seed+10000）
+
+#### 变更
+
+- 63 个坏 kpts chunk（train 53 / val 10）断点续跑重生成（σ 场物理逐位
+  不变，仅 kpts 走修复路径）；两份拼装 npz 重建，train pos_rate 99.4% /
+  val 98.5%，kpts 全部 ∈ [8,16]
+
+#### 已知问题新增
+
+- V5-027 条目（含教训：GT 验收清单补"K 上限断言"）
+
+---
+
 ## [v5.0.10-alpha] - 2026-09-29
 
 ### fast 口径转正为 v5-α 训练口径（V5-017 推翻）+ D' 全量生成链路
@@ -35,7 +65,8 @@
 #### 变更
 
 - 训练数据口径：fast+D'+th=60（V5-024 修后判据写死口径），train
-  seed=424242 n=1000 / val seed=524242 n=200（种子基拉开 10 万防重叠）
+  seed=424242 n=1000 / val seed=434242 n=200（trainer 硬编码
+  val seed=train seed+10000，非 CLI 可调——生成必须对齐此约定）
 - `docs/v5_已知问题.md`：V5-017 标注推翻；新增 V5-025（默认曲线 D'
   不存活档案）与 V5-026（生成器适配记录）
 
