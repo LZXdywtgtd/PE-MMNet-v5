@@ -85,6 +85,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lambda_bbox", type=float, default=1.0)
     parser.add_argument("--lambda_gp", type=float, default=0.1)
     parser.add_argument("--lambda_poisson", type=float, default=0.05)
+    parser.add_argument("--lambda_kpt_direct", type=float, default=0.5)
     parser.add_argument("--save_every", type=int, default=1)
     # 设备 / 路径
     parser.add_argument("--device", type=str, default=None,
@@ -131,6 +132,7 @@ def main():
         lambda_bbox=args.lambda_bbox,
         lambda_gp=args.lambda_gp,
         lambda_poisson=args.lambda_poisson,
+        lambda_kpt_direct=args.lambda_kpt_direct,
         use_aug=not args.no_aug,
         seed=args.seed,
         device=args.device,
