@@ -247,6 +247,111 @@ def coverage_loss(
     return torch.stack(per_sample).mean()
 
 
+def resample_kpts_arclength(
+    true_kpts: torch.Tensor,
+    kpt_mask: torch.Tensor,
+    n_out: int,
+) -> torch.Tensor:
+    """
+    GT 关键点等弧长重采样到固定 n_out 个（V5-030 候选 1 方案 B）
+
+    真 GT 的 K 是 8-16 变长，模型固定输出 16 点。Catmull-Rom 穿过
+    全部 16 点 → 多余点把样条拉出裂纹区。方案 B：沿 GT 折线（有序）
+    等弧长取 n_out 个点作为每个 pred 点的唯一有序目标，K 长度不匹配
+    消失；引入的是 GT 折线插值误差，换来监督几何一致。
+
+    方向规范化（V5-030 第二轮，2026-09-30）：GT 端到端方向由骨架端点
+    扫描顺序决定，对输入不可学——首轮训练（v5a6_dprime_ordered）中
+    方向逐样本随机翻转使有序目标自相矛盾，模型收敛到两方向折中
+    （ratio 7.06→10.64 反而恶化）。重采样前统一为"首点 (y,x) 字典序
+    较小的一端"，方向由裂纹几何唯一决定且在输入图像中可见、可学。
+
+    Args:
+        true_kpts: (B, K_max, 2) GT 关键点（-1 = padding）
+        kpt_mask: (B, K_max) bool — True = 真实点
+        n_out: 输出点数（= 模型 max_kpts，16）
+
+    Returns:
+        (B, n_out, 2) — 每样本沿 GT 弧长均匀的 n_out 个点
+    """
+    B = true_kpts.size(0)
+    device = true_kpts.device
+    out = torch.zeros(B, n_out, 2, device=device, dtype=true_kpts.dtype)
+    for i in range(B):
+        pts = true_kpts[i][kpt_mask[i]]  # (K_i, 2) 有序
+        K = pts.size(0)
+        if K == 0:
+            out[i] = -1.0
+            continue
+        if K >= 2 and ((pts[0, 0], pts[0, 1]) > (pts[-1, 0], pts[-1, 1])):
+            pts = pts.flip(0)  # 方向规范化：首点字典序较小
+        if K == 1:
+            out[i] = pts[0]
+            continue
+        seg = pts[1:] - pts[:-1]                       # (K-1, 2)
+        seg_len = seg.norm(dim=-1)                     # (K-1,)
+        cum = torch.cat([
+            torch.zeros(1, device=device, dtype=seg_len.dtype),
+            torch.cumsum(seg_len, dim=0),
+        ])                                             # (K,)
+        total = cum[-1]
+        if total < 1e-8:
+            out[i] = pts[0]
+            continue
+        # n_out 个均匀弧长位置（含两端）；idx = s 所落段序号 ∈ [0, K-2]
+        s = torch.linspace(0.0, 1.0, n_out, device=device,
+                           dtype=seg_len.dtype) * total
+        idx = (torch.searchsorted(cum, s, right=True) - 1).clamp(0, K - 2)
+        t = ((s - cum[idx]) / (seg_len[idx] + 1e-12)).unsqueeze(-1)
+        out[i] = pts[idx] + t * seg[idx]
+    return out
+
+
+def ordered_kpt_loss(
+    pred_kpts: torch.Tensor,
+    true_kpts: torch.Tensor,
+    kpt_mask: torch.Tensor,
+) -> torch.Tensor:
+    """
+    有序监督（V5-030 候选 1）：pred 点 i ↔ 重采样 GT 点 i，Smooth L1
+
+    诊断依据（_diag_kpt_order.py，kd0.5 latest ep150，10 val 样本）：
+    相邻 pred 连线 vs 相邻 GT 连线平均角度差 35°（随机基线 45°）——
+    顺序乱成立；kpt_direct 的"最近像素"无序匹配允许点乱停靠。
+    本 loss 给每个 pred 点唯一有序目标。
+
+    全负样本 batch（GT 无点）返回 0。
+    """
+    tgt = resample_kpts_arclength(true_kpts, kpt_mask, pred_kpts.size(1))
+    # 无 GT 的样本（tgt 全 -1）不参与
+    valid = (tgt > -0.5).all(dim=-1)  # (B, n_out)
+    if not valid.any():
+        return pred_kpts.sum() * 0.0
+    diff = pred_kpts - tgt
+    per_pt = torch.nn.functional.smooth_l1_loss(
+        diff, torch.zeros_like(diff), reduction="none",
+    ).sum(dim=-1)  # (B, n_out)
+    return per_pt[valid].mean()
+
+
+def validity_loss(
+    pred_validity: torch.Tensor,
+    kpt_mask: torch.Tensor,
+) -> torch.Tensor:
+    """
+    validity 监督（V5-030 候选 1）：BCE(pred_validity, has_gt)
+
+    validity 头设计了但从未被监督（V5-029，150ep 后 std 0.247≈未
+    训练）。方案 B 下重采样 GT 恒为 n_out 个点 → 正样本目标全 1、
+    负样本（无裂纹）目标全 0。推理接口 predict_kpts_only 因此有确定
+    行为。kpt_mask 全 False 的样本目标全 0。
+    """
+    if pred_validity.size(0) == 0:
+        return pred_validity.sum() * 0.0
+    target = kpt_mask.any(dim=-1).float().unsqueeze(-1).expand_as(pred_validity)
+    return torch.nn.functional.binary_cross_entropy(pred_validity, target)
+
+
 def kpt_direct_loss(
     pred_kpts: torch.Tensor,
     true_crack_pixels: torch.Tensor,
@@ -426,6 +531,8 @@ class OrderedKeypointLoss(nn.Module):
         M: int = 200,
         bbox_beta: float = 1.0,
         lambda_kpt_direct: float = 0.5,
+        lambda_ordered: float = 0.0,
+        lambda_validity: float = 0.0,
         # ---- v5-β 占位权重 ----
         lambda_position_6d: float = 0.0,
         lambda_uv_projection: float = 0.0,
@@ -441,6 +548,10 @@ class OrderedKeypointLoss(nn.Module):
             bbox_beta: Smooth L1 的 β 参数
             lambda_kpt_direct: 关键点直接监督权重（2026-09-29 加入，
                 修复样条双重间接监督的梯度病态）
+            lambda_ordered: 有序监督权重（V5-030 候选 1，默认 0；
+                pred 点 i ↔ GT 等弧长重采样点 i，Smooth L1）
+            lambda_validity: validity 监督权重（V5-030 候选 1，默认 0；
+                关闭 V5-029 未监督问题）
             lambda_position_6d: 位置 6D loss 权重（v5-β 占位）
             lambda_uv_projection: UV 投影 loss 权重（v5-β 占位）
         """
@@ -450,6 +561,8 @@ class OrderedKeypointLoss(nn.Module):
                 f"coverage_mode 应为 'chamfer' 或 'hausdorff'，实际 {coverage_mode!r}"
             )
         self.lambda_kpt_direct = lambda_kpt_direct
+        self.lambda_ordered = lambda_ordered
+        self.lambda_validity = lambda_validity
         self.lambda_coverage = lambda_coverage
         self.lambda_bbox = lambda_bbox
         self.lambda_gp = lambda_gp
@@ -469,6 +582,9 @@ class OrderedKeypointLoss(nn.Module):
         true_crack_pixels: torch.Tensor, # (B, N, 2)
         gp_module=None,                  # GPModule 实例（可选）
         pixel_mask: torch.Tensor | None = None,  # (B, N) True=真实像素
+        true_kpts: torch.Tensor | None = None,   # (B, K_max, 2) 有序 GT
+        kpt_mask: torch.Tensor | None = None,    # (B, K_max) bool
+        pred_validity: torch.Tensor | None = None,  # (B, max_kpts)
         # ---- v5-β 占位 ----
         true_position_6d: torch.Tensor | None = None,
         pred_position_6d: torch.Tensor | None = None,
@@ -488,6 +604,11 @@ class OrderedKeypointLoss(nn.Module):
                 None 时按旧行为（仅单样本无 padding 场景安全）。
             true_position_6d: (B, 6) 真值位姿（v5-β），None → 占位
             pred_position_6d: (B, 6) 预测位姿（v5-β），None → 占位
+            true_kpts: (B, K_max, 2) 有序 GT 关键点（-1 padding），
+                lambda_ordered > 0 时必传
+            kpt_mask: (B, K_max) GT 关键点真实性标记，同上
+            pred_validity: (B, max_kpts) 模型 validity 输出，
+                lambda_validity > 0 时必传
 
         Returns:
             dict:
@@ -510,6 +631,22 @@ class OrderedKeypointLoss(nn.Module):
         loss_kpt_direct = kpt_direct_loss(
             pred_kpts, true_crack_pixels, pixel_mask=pixel_mask,
         )
+
+        # 1c. 有序监督（V5-030 候选 1，默认关）
+        if self.lambda_ordered > 0:
+            if true_kpts is None or kpt_mask is None:
+                raise ValueError("lambda_ordered > 0 需要传 true_kpts/kpt_mask")
+            loss_ordered = ordered_kpt_loss(pred_kpts, true_kpts, kpt_mask)
+        else:
+            loss_ordered = torch.tensor(0.0, device=pred_bbox.device)
+
+        # 1d. validity 监督（V5-030 候选 1，关闭 V5-029，默认关）
+        if self.lambda_validity > 0:
+            if pred_validity is None or kpt_mask is None:
+                raise ValueError("lambda_validity > 0 需要传 pred_validity/kpt_mask")
+            loss_validity = validity_loss(pred_validity, kpt_mask)
+        else:
+            loss_validity = torch.tensor(0.0, device=pred_bbox.device)
 
         # 2. bbox Smooth L1
         loss_bbox = self.bbox_loss(pred_bbox, true_bbox)
@@ -535,6 +672,8 @@ class OrderedKeypointLoss(nn.Module):
         total = (
             self.lambda_coverage * loss_cov
             + self.lambda_kpt_direct * loss_kpt_direct
+            + self.lambda_ordered * loss_ordered
+            + self.lambda_validity * loss_validity
             + self.lambda_bbox * loss_bbox
             + self.lambda_gp * loss_gp
             + self.lambda_poisson * loss_poisson
@@ -546,6 +685,8 @@ class OrderedKeypointLoss(nn.Module):
             "total": total,
             "coverage": loss_cov.detach(),
             "kpt_direct": loss_kpt_direct.detach(),
+            "ordered": loss_ordered.detach(),
+            "validity": loss_validity.detach(),
             "bbox": loss_bbox.detach(),
             "gp": loss_gp.detach(),
             "poisson": loss_poisson.detach(),

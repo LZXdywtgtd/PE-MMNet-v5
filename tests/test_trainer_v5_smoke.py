@@ -252,9 +252,9 @@ def test_fit_writes_csv_and_ckpt():
         assert os.path.exists(best_pt)
         assert os.path.exists(latest_pt)
 
-        assert final["best_val_loss"] < float("inf")
+        assert final["best_val_coverage"] < float("inf")
         print(f"  [OK] fit_writes_csv_and_ckpt: CSV 4 行, "
-              f"best.pt + latest.pt 存在, best_val={final['best_val_loss']:.4f}")
+              f"best.pt + latest.pt 存在, best_val_cov={final['best_val_coverage']:.4f}")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -370,7 +370,7 @@ def test_end_to_end_all_variants():
             trainer = _make_trainer(tmp, variant=variant, epochs=1)
             final = trainer.fit(verbose=False)
             assert final["last_train_loss"] >= 0
-            assert final["best_val_loss"] < float("inf")
+            assert final["best_val_coverage"] < float("inf")
         print(f"  [OK] end_to_end_all_variants: 5 变体全部完成 1 epoch")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

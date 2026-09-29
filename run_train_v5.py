@@ -86,6 +86,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lambda_gp", type=float, default=0.1)
     parser.add_argument("--lambda_poisson", type=float, default=0.05)
     parser.add_argument("--lambda_kpt_direct", type=float, default=0.5)
+    parser.add_argument("--lambda_ordered", type=float, default=0.0,
+                        help="有序监督权重（V5-030 候选 1）")
+    parser.add_argument("--lambda_validity", type=float, default=0.0,
+                        help="validity 监督权重（V5-030 候选 1）")
     parser.add_argument("--save_every", type=int, default=1)
     # 设备 / 路径
     parser.add_argument("--device", type=str, default=None,
@@ -133,6 +137,8 @@ def main():
         lambda_gp=args.lambda_gp,
         lambda_poisson=args.lambda_poisson,
         lambda_kpt_direct=args.lambda_kpt_direct,
+        lambda_ordered=args.lambda_ordered,
+        lambda_validity=args.lambda_validity,
         use_aug=not args.no_aug,
         seed=args.seed,
         device=args.device,
@@ -171,7 +177,10 @@ def main():
     print(f"  λ 权重:      cov={args.lambda_coverage} "
           f"bbox={args.lambda_bbox} "
           f"gp={args.lambda_gp} "
-          f"poisson={args.lambda_poisson}")
+          f"poisson={args.lambda_poisson} "
+          f"kpt_direct={args.lambda_kpt_direct} "
+          f"ordered={args.lambda_ordered} "
+          f"validity={args.lambda_validity}")
     print(f"  设备:        {trainer.device}")
     print(f"  log_dir:     {args.log_dir}")
     print(f"  cache_dir:   {args.cache_dir or '无（现场仿真）'}")
@@ -186,6 +195,7 @@ def main():
     print(f"  最终 train_loss: {final['last_train_loss']:.4f}")
     print(f"  最终 val_loss:   {final['last_val_loss']:.4f}")
     print(f"  最佳 val_loss:   {final['best_val_loss']:.4f}")
+    print(f"  最佳 val_cov:    {final['best_val_coverage']:.4f}")
     print(f"  CSV 历史:        {trainer.csv_path}")
     print(f"  检查点:          {trainer.log_dir}/checkpoints/")
     print(f"{'='*60}")
