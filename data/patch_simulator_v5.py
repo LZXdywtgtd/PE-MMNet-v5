@@ -373,7 +373,11 @@ class PatchSimulator:
             mask = (labeled == largest_label).astype(np.uint8)
 
         # 4. 闭运算（连接断裂处）
-        mask = ndimage.binary_closing(mask, iterations=2).astype(np.uint8)
+        # border_value=1：边界处按"结构元全在 mask 内"处理——scipy 默认 0
+        # 会腐蚀贴边细线（V5-024：seed 4215 裸 95px→0px）
+        mask = ndimage.binary_closing(
+            mask, iterations=2, border_value=1
+        ).astype(np.uint8)
 
         # 5. 形态学细化（可选）
         # skeleton = morphology.skeletonize(mask > 0)
