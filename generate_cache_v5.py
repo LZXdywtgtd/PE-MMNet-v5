@@ -61,9 +61,10 @@ def thermal_profile_hash(thermal_profile: dict) -> str:
 
 def chunk_dir_name(args) -> str:
     th = thermal_profile_hash(args.thermal_profile)
+    dp = "_dp" if getattr(args, "dprime", False) else ""
     return (
         f"chunks_p{args.patch_size}_s{args.seed}"
-        f"_t{th}_th{args.crack_stress_threshold_MPa}"
+        f"_t{th}_th{args.crack_stress_threshold_MPa}{dp}"
     )
 
 
@@ -77,17 +78,30 @@ def generate_one(idx: int, cfg: dict) -> str:
     )
     os.close(tmp_fd)
     try:
-        from data.patch_dataset_v5 import PatchDatasetV5
+        if cfg.get("dprime"):
+            # D' 边界调制路线（fast 口径管线验证，V5-025）：
+            # _dprime_generator.generate_dprime_sample 复刻 _generate_sample
+            # 打包逻辑；安全网②已证 σ 场与实验缓存逐位一致
+            from _dprime_generator import generate_dprime_sample
 
-        ds = PatchDatasetV5(
-            patch_size=cfg["patch_size"],
-            n_samples=1,  # 只为借用 _generate_sample；不影响输出
-            seed=cfg["seed"] + idx,  # _generate_sample 内部用 seed+idx
-            crack_stress_threshold_MPa=cfg["threshold"],
-            thermal_profile=cfg["thermal_profile"] or None,
-            precompute=False,
-        )
-        sample = ds._generate_sample(0)
+            sample = generate_dprime_sample(
+                idx, seed_base=cfg["seed"],
+                patch_size=cfg["patch_size"],
+                threshold_MPa=cfg["threshold"],
+                thermal_profile=cfg["thermal_profile"] or None,
+            )
+        else:
+            from data.patch_dataset_v5 import PatchDatasetV5
+
+            ds = PatchDatasetV5(
+                patch_size=cfg["patch_size"],
+                n_samples=1,  # 只为借用 _generate_sample；不影响输出
+                seed=cfg["seed"] + idx,  # _generate_sample 内部用 seed+idx
+                crack_stress_threshold_MPa=cfg["threshold"],
+                thermal_profile=cfg["thermal_profile"] or None,
+                precompute=False,
+            )
+            sample = ds._generate_sample(0)
         # 复刻 _save_to_npz 的单样本打包（padding/mask 逻辑一致）
         k = sample["true_keypoints"].size(0)
         m = sample["true_crack_pixels"].size(0)
@@ -137,6 +151,9 @@ def assemble(args, chunk_dir: str) -> str:
         args.patch_size, args.n_samples, args.seed,
         th, args.crack_stress_threshold_MPa,
     )
+    if getattr(args, "dprime", False):
+        # D' 物理与 stock 不同（同 seed 同参数下），防与 stock 缓存撞名
+        cache_name = cache_name.replace(".npz", "_dp.npz")
     out_path = os.path.join(args.cache_dir, cache_name)
     if os.path.exists(out_path):
         print(f"[assemble] 已存在，跳过: {out_path}")
@@ -243,6 +260,11 @@ def main():
         help="1min 短周期（管线测试用）",
     )
     ap.add_argument(
+        "--dprime", action="store_true",
+        help="D' 边界调制 GT（fast 口径 v5-α 管线验证，见 V5-024/025）；"
+             "隐含 fast_thermal",
+    )
+    ap.add_argument(
         "--cache_dir", default="logs/sim_cache",
         help="npz 缓存根目录（chunk 与拼装产物都在这）",
     )
@@ -263,7 +285,7 @@ def main():
             "soak_duration_min": 1.0,
             "cool_down_c_per_min": 1260.0,
         }
-        if args.fast_thermal
+        if (args.fast_thermal or args.dprime)
         else DEFAULT_PROFILE
     )
 
@@ -275,7 +297,8 @@ def main():
         f"[config] p{args.patch_size} n={args.n_samples} "
         f"seed={args.seed} th={args.crack_stress_threshold_MPa} "
         f"workers={args.workers} "
-        f"thermal={'fast' if args.fast_thermal else 'default(11.17h)'}"
+        f"thermal={'fast' if (args.fast_thermal or args.dprime) else 'default(11.17h)'}"
+        f"{' dprime' if args.dprime else ''}"
     )
 
     if args.assemble_only:
@@ -304,6 +327,7 @@ def main():
                     "seed": args.seed,
                     "threshold": args.crack_stress_threshold_MPa,
                     "thermal_profile": args.thermal_profile,
+                    "dprime": args.dprime,
                 }): i
                 for i in pending
             }
