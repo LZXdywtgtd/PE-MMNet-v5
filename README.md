@@ -139,7 +139,7 @@
 conda activate pe_mmnet
 
 # 2. 冒烟测试
-cd D:\team_project\projects\pe_mmnet\project_v5
+cd D:\New_team_project\projects\pe_mmnet\project_v5
 python run_train_v5.py --variant resnet18 --epochs 1 --n_samples 2 \
     --patch_size 64 --fast_thermal --log_dir logs/smoke
 ```
