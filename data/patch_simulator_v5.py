@@ -17,6 +17,8 @@ V5A1 整合模块：在 256×256 patch 上跑完整热-应力-裂纹仿真。
 
 from __future__ import annotations
 
+from collections import deque
+
 import numpy as np
 
 from data.thermal_profile import generate_thermal_profile
@@ -55,6 +57,7 @@ class PatchSimulator:
         min_keypoints: int = 8,
         max_keypoints: int = 16,
         seed: int = 42,
+        max_history_samples: int = 600,  # 历史采样截尾（None=不截尾）
     ):
         """
         Args:
@@ -68,11 +71,13 @@ class PatchSimulator:
             min_keypoints:      关键点下界
             max_keypoints:      关键点上界
             seed:               随机种子（裂纹形状随机化）
+            max_history_samples: 历史采样截尾帧数（None=不截尾，旧行为）
         """
         self.patch_size = patch_size
         self.physical_size_cm = physical_size_cm
         self.physical_size_m = physical_size_cm / 100.0
         self.thermal_profile_cfg = thermal_profile or {}
+        self.max_history_samples = max_history_samples
         self.boundary_cfg = boundary_config or {
             "multi_direction_heat": True,
             "surface_radiation": True,
@@ -111,11 +116,28 @@ class PatchSimulator:
         self.T_field: np.ndarray | None = None       # (H, W) 当前温度
         self.sigma_field: np.ndarray | None = None   # (H, W) 当前应力
         self.t_history: list[float] = []             # 时间序列
-        self.T_history: list[np.ndarray] = []        # 温度历史（采样）
-        self.sigma_history: list[np.ndarray] = []    # 应力历史（采样）
+        self._T_hist_buf: deque | None = None        # 温度历史（有界缓冲）
+        self._sigma_hist_buf: deque | None = None    # 应力历史（有界缓冲）
         self._sigma_max_field: np.ndarray | None = None  # (H, W) 全程峰值拉应力场
 
-        self._rng = np.random.default_rng(seed)
+        # ── 样本多样性随机化（2026-09-28：修复确定性仿真退化）──
+        # 原 _rng 只用于关键点数，同一 (patch, 曲线, dt) 下所有样本物理全同。
+        # 现在每实例用 rng 抽取批次差异因子（坯体材质/表面状态不均匀）：
+        #   E/α_T ±20%、τ ±30%、h ±30%、ε U(0.85,0.95)
+        # 注意：必须在 stress_solver 构造后重建它，使随机 E/α_T/τ 生效。
+        rng = np.random.default_rng(seed)
+        u = rng.uniform
+        self.stress_solver = MaxwellStress(
+            young_modulus_GPa=200.0 * u(0.8, 1.2),
+            thermal_expansion=8e-6 * u(0.8, 1.2),
+            relaxation_time_s=60.0 * u(0.7, 1.3),
+        )
+        self.h_conv *= u(0.7, 1.3)
+        self.radiation.emissivity = u(0.85, 0.95)
+        # 初始温度噪声幅度 N(0, 2℃)（坯体初始温度不均）
+        self._init_temp_noise_std_c = 2.0
+        self._init_rng = np.random.default_rng(seed + 1)
+        self._rng = rng  # 沿用原用途（关键点数随机化）
 
     # ============================================================
     #  主仿真入口
@@ -135,7 +157,8 @@ class PatchSimulator:
 
         Returns:
             dict:
-                temperature_field:    (T_samples, H, W)  温度场历史（采样）
+                temperature_field:    (T_samples, H, W)  温度场历史（采样，
+                                      最多保留 max_history_samples 帧）
                 stress_field:         (T_samples, H, W)  应力场历史（采样）
                 heatmap:              (H, W)             最终温度场（输入给模型）
                 crack_mask:           (H, W) uint8       像素级裂纹 mask（GT）
@@ -143,11 +166,26 @@ class PatchSimulator:
                 crack_bbox:           (4,)               bbox GT
                 metadata:             dict               配置元数据
         """
-        # 1. 初始化温度场（室温）
+        # 1. 初始化温度场（室温 + 坯体初始温度不均噪声）
         H = W = self.patch_size
         self.T_field = np.full((H, W), 20.0, dtype=np.float64)  # 20°C
+        if self._init_temp_noise_std_c > 0:
+            self.T_field += self._init_rng.normal(
+                0.0, self._init_temp_noise_std_c, size=(H, W)
+            )
         self.sigma_field = np.zeros((H, W), dtype=np.float64)
         self._sigma_max_field = np.zeros((H, W), dtype=np.float64)  # 峰值拉应力场
+
+        # 历史采样缓冲（截尾：只保留最后 max_history_samples 帧）
+        # 2026-09-29：默认曲线 128px 全程 6.9 万帧 ≈ 18 GB，多进程 OOM 根因；
+        # 模型只用最后 300 帧（x_1d）+ 最终帧（x_2d），截尾不影响模型可见输出。
+        if self.max_history_samples is not None:
+            self._T_hist_buf = deque(maxlen=self.max_history_samples)
+            self._sigma_hist_buf = deque(maxlen=self.max_history_samples)
+        else:
+            self._T_hist_buf = []
+            self._sigma_hist_buf = []
+        self.t_history = []
 
         # 2. 生成三段曲线
         times_s, target_temps_c = generate_thermal_profile(
@@ -178,8 +216,8 @@ class PatchSimulator:
             # 采样历史
             if step % sample_interval_steps == 0 or step == n_steps - 1:
                 self.t_history.append(times_s[step])
-                self.T_history.append(self.T_field.copy())
-                self.sigma_history.append(self.sigma_field.copy())
+                self._T_hist_buf.append(self.T_field.copy())
+                self._sigma_hist_buf.append(self.sigma_field.copy())
 
             # 累积峰值拉应力场（每步更新）
             np.maximum(self._sigma_max_field, self.sigma_field,
@@ -198,8 +236,8 @@ class PatchSimulator:
         heatmap = self._build_heatmap(self.T_field)
 
         return {
-            "temperature_field": np.stack(self.T_history, axis=0),
-            "stress_field":      np.stack(self.sigma_history, axis=0),
+            "temperature_field": np.stack(self._T_hist_buf, axis=0),
+            "stress_field":      np.stack(self._sigma_hist_buf, axis=0),
             "heatmap":           heatmap,
             "crack_mask":        crack_mask,
             "crack_keypoints":   keypoints,

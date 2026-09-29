@@ -166,25 +166,36 @@ def coverage_loss(
     true_crack_pixels: torch.Tensor,
     M: int = 200,
     mode: str = "chamfer",
+    pixel_mask: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
-    B 样条 + 覆盖距离 loss
+    B 样条 + 双向覆盖距离 loss（2026-09-29 修复版）
+
+    修复两处（v5a6 平台解根因，定量证据见 _diag_negpad.py）：
+    1. padding 掩蔽：pixel_mask=None 时 batch 中负样本的 -1 padding
+       坐标会全部进入 chamfer（2 正 6 负 batch 中 9 万个假像素），
+       监督目标被污染。现在 mask=False 的像素不参与距离。
+    2. 双向 chamfer：原单向（真像素→样条）允许"摊开覆盖"平凡解——
+       边界角点 0.0148 < 真关键点 0.0925。现加"样条→真像素"反向项，
+       样条上的点也必须落在裂纹附近。
 
     步骤：
         1. 用预测关键点 (B, K, 2) 拟合 Catmull-Rom 样条
         2. 在样条上密集采样 M 个点
-        3. 真值裂纹像素 (B, N, 2) 到样条的最小距离
-        4. chamfer: mean over true pixels of min distance
-           hausdorff: max over true pixels of min distance
+        3. 正向：真像素 → 最近样条点距离（mean over 真像素）
+        4. 反向：样条点 → 最近真像素距离（mean over 样条点）
+        5. chamfer = (正向 + 反向) / 2；hausdorff 用两方向 max 的较大者
 
     Args:
         pred_kpts: (B, K, 2) — 预测的有序关键点，K ∈ [8, 16]
-        true_crack_pixels: (B, N, 2) — 真值裂纹像素（来自 crack_mask）
+        true_crack_pixels: (B, N, 2) — 真值裂纹像素（-1 = padding）
         M: 在曲线上密集采样的点数（默认 200）
-        mode: "chamfer"（默认，更平滑）或 "hausdorff"（更严格）
+        mode: "chamfer"（默认）或 "hausdorff"
+        pixel_mask: (B, N) bool — True=真实像素。None 时全按真实处理
+            （仅整个 batch 都是正样本且无 padding 时安全）。
 
     Returns:
-        loss: 标量
+        loss: 标量（正样本子集上的均值；全负样本 batch 返回 0）
     """
     if mode not in ("chamfer", "hausdorff"):
         raise ValueError(f"mode 应为 'chamfer' 或 'hausdorff'，实际 {mode!r}")
@@ -197,35 +208,81 @@ def coverage_loss(
 
     B = pred_kpts.size(0)
 
-    # 1. 拟合样条 + 采样
+    # 每样本真实像素数（mask=None 时按原 N 处理）
+    if pixel_mask is not None:
+        n_real = pixel_mask.sum(dim=-1)  # (B,)
+    else:
+        n_real = torch.full(
+            (B,), true_crack_pixels.size(1),
+            device=true_crack_pixels.device,
+        )
+
+    has_crack = n_real > 0  # (B,)
+    if not has_crack.any():
+        # 全负样本 batch：无监督信号，返回 0（保留图以维持 autograd 图）
+        return (pred_kpts.sum() * 0.0)
+
     spline_samples = catmull_rom_spline_torch(pred_kpts, M)  # (B, M, 2)
 
-    # 处理空真值像素情况：所有样本都没有裂纹像素 → 返回 0
-    N = true_crack_pixels.size(1)
-    if N == 0:
-        # 用一个温和的 surrogate：要求预测关键点尽量在 patch 中心
-        # 避免返回 NaN/0 让梯度停滞
-        center = pred_kpts.new_tensor([[0.5, 0.5]]).expand(B, 1, 2)
-        diff = pred_kpts - center
-        surrogate = (diff ** 2).sum(dim=-1).mean()  # 鼓励 kpts 集中
-        return surrogate * 0.0  # 系数 0 — 不贡献梯度（仅占位）
+    per_sample = []
+    for i in range(B):
+        if not has_crack[i]:
+            continue
+        n = int(n_real[i])
+        px_i = true_crack_pixels[i, :n]        # (n, 2) 真实像素
+        sp_i = spline_samples[i]               # (M, 2)
 
-    # 2. pairwise 距离（平方欧氏距离）
-    # true: (B, N, 2) → (B, N, 1, 2)
-    # samples: (B, M, 2) → (B, 1, M, 2)
-    diff = true_crack_pixels.unsqueeze(2) - spline_samples.unsqueeze(1)  # (B, N, M, 2)
-    sq_dist = (diff * diff).sum(dim=-1)  # (B, N, M)
+        # 正向：真像素 → 最近样条点
+        d_t2s = torch.cdist(px_i, sp_i)        # (n, M)
+        fwd = d_t2s.min(dim=-1).values         # (n,)
+        # 反向：样条点 → 最近真像素
+        bwd = d_t2s.min(dim=0).values          # (M,)  ← 复用同一距离矩阵
 
-    # 3. 每个真像素到样条的最小距离
-    min_per_true = sq_dist.min(dim=-1).values  # (B, N)
+        if mode == "chamfer":
+            s = fwd.mean() + bwd.mean()
+        else:  # hausdorff：两方向最坏距离的较大者
+            s = torch.maximum(fwd.max(), bwd.max())
+        per_sample.append(s)
 
-    # 4. chamfer / hausdorff
-    if mode == "chamfer":
-        per_sample = min_per_true.mean(dim=-1)  # (B,)
-    else:  # hausdorff
-        per_sample = min_per_true.max(dim=-1).values  # (B,)
+    return torch.stack(per_sample).mean()
 
-    return per_sample.mean()
+
+def kpt_direct_loss(
+    pred_kpts: torch.Tensor,
+    true_crack_pixels: torch.Tensor,
+    pixel_mask: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """
+    关键点直接监督（2026-09-29 加入）
+
+    pred_kpts → 最近真像素的 L2，不经过样条。修复原设计中
+    kpts 只有"样条→chamfer"双重间接监督（梯度穿两层、样条在
+    饱和点梯度病态）导致的塌缩。仅正样本参与。
+
+    Returns:
+        loss: 标量（正样本子集均值；全负样本 batch 返回 0）
+    """
+    B, K, _ = pred_kpts.shape
+    if pixel_mask is not None:
+        n_real = pixel_mask.sum(dim=-1)
+    else:
+        n_real = torch.full(
+            (B,), true_crack_pixels.size(1),
+            device=true_crack_pixels.device,
+        )
+    has_crack = n_real > 0
+    if not has_crack.any():
+        return pred_kpts.sum() * 0.0
+
+    per_sample = []
+    for i in range(B):
+        if not has_crack[i]:
+            continue
+        n = int(n_real[i])
+        d = torch.cdist(pred_kpts[i], true_crack_pixels[i, :n])  # (K, n)
+        per_sample.append(d.min(dim=-1).values.mean())  # (K,) → 标量
+
+    return torch.stack(per_sample).mean()
 
 
 # ============================================================
@@ -368,6 +425,7 @@ class OrderedKeypointLoss(nn.Module):
         coverage_mode: str = "chamfer",
         M: int = 200,
         bbox_beta: float = 1.0,
+        lambda_kpt_direct: float = 0.5,
         # ---- v5-β 占位权重 ----
         lambda_position_6d: float = 0.0,
         lambda_uv_projection: float = 0.0,
@@ -381,6 +439,8 @@ class OrderedKeypointLoss(nn.Module):
             coverage_mode: "chamfer" / "hausdorff"
             M: 样条采样点数
             bbox_beta: Smooth L1 的 β 参数
+            lambda_kpt_direct: 关键点直接监督权重（2026-09-29 加入，
+                修复样条双重间接监督的梯度病态）
             lambda_position_6d: 位置 6D loss 权重（v5-β 占位）
             lambda_uv_projection: UV 投影 loss 权重（v5-β 占位）
         """
@@ -389,6 +449,7 @@ class OrderedKeypointLoss(nn.Module):
             raise ValueError(
                 f"coverage_mode 应为 'chamfer' 或 'hausdorff'，实际 {coverage_mode!r}"
             )
+        self.lambda_kpt_direct = lambda_kpt_direct
         self.lambda_coverage = lambda_coverage
         self.lambda_bbox = lambda_bbox
         self.lambda_gp = lambda_gp
@@ -407,6 +468,7 @@ class OrderedKeypointLoss(nn.Module):
         true_bbox: torch.Tensor,         # (B, 4)
         true_crack_pixels: torch.Tensor, # (B, N, 2)
         gp_module=None,                  # GPModule 实例（可选）
+        pixel_mask: torch.Tensor | None = None,  # (B, N) True=真实像素
         # ---- v5-β 占位 ----
         true_position_6d: torch.Tensor | None = None,
         pred_position_6d: torch.Tensor | None = None,
@@ -420,6 +482,10 @@ class OrderedKeypointLoss(nn.Module):
             true_bbox: (B, 4) — 真值 bbox
             true_crack_pixels: (B, N, 2) — 真值裂纹像素 (y, x)
             gp_module: 可选 GPModule 实例
+            pixel_mask: (B, N) 真实像素标记。2026-09-29 必传：负样本的
+                -1 padding 坐标若进入 chamfer，会成为 9 万个假像素级
+                的错误监督（v5a6 平台解根因，见 _diag_negpad.py）。
+                None 时按旧行为（仅单样本无 padding 场景安全）。
             true_position_6d: (B, 6) 真值位姿（v5-β），None → 占位
             pred_position_6d: (B, 6) 预测位姿（v5-β），None → 占位
 
@@ -430,12 +496,19 @@ class OrderedKeypointLoss(nn.Module):
                 bbox: bbox Smooth L1 分量（detached）
                 gp: GP LML 分量（detached），gp_module=None 时为 0
                 poisson: 泊松先验分量（detached）
+                kpt_direct: 关键点直接监督分量（detached）
                 position_6d: 位置 6D 分量（detached，v5-β）
                 uv_projection: UV 投影分量（detached，v5-β）
         """
-        # 1. 覆盖距离
+        # 1. 覆盖距离（双向 chamfer + padding 掩蔽 + 负样本跳过）
         loss_cov = coverage_loss(
-            pred_kpts, true_crack_pixels, M=self.M, mode=self.coverage_mode
+            pred_kpts, true_crack_pixels, M=self.M, mode=self.coverage_mode,
+            pixel_mask=pixel_mask,
+        )
+
+        # 1b. 关键点直接监督：pred_kpts → 最近真像素 L2（不经样条）
+        loss_kpt_direct = kpt_direct_loss(
+            pred_kpts, true_crack_pixels, pixel_mask=pixel_mask,
         )
 
         # 2. bbox Smooth L1
@@ -461,6 +534,7 @@ class OrderedKeypointLoss(nn.Module):
         # 总损失
         total = (
             self.lambda_coverage * loss_cov
+            + self.lambda_kpt_direct * loss_kpt_direct
             + self.lambda_bbox * loss_bbox
             + self.lambda_gp * loss_gp
             + self.lambda_poisson * loss_poisson
@@ -471,6 +545,7 @@ class OrderedKeypointLoss(nn.Module):
         return {
             "total": total,
             "coverage": loss_cov.detach(),
+            "kpt_direct": loss_kpt_direct.detach(),
             "bbox": loss_bbox.detach(),
             "gp": loss_gp.detach(),
             "poisson": loss_poisson.detach(),

@@ -71,6 +71,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max_kpts", type=int, default=16)
     parser.add_argument("--seq_len", type=int, default=300)
     parser.add_argument("--crack_stress_threshold_MPa", type=float, default=50.0)
+    parser.add_argument("--cache_dir", type=str, default=None,
+                        help="仿真 npz 缓存目录（命中则零仿真）")
     parser.add_argument("--no_aug", action="store_true", help="禁用数据增强")
     # 训练
     parser.add_argument("--epochs", type=int, default=10)
@@ -136,6 +138,7 @@ def main():
         thermal_profile=thermal_profile,
         crack_stress_threshold_MPa=args.crack_stress_threshold_MPa,
         save_every=args.save_every,
+        cache_dir=args.cache_dir,
         model_kwargs={"pretrained_2d": args.pretrained_2d},
     )
 
@@ -169,6 +172,7 @@ def main():
           f"poisson={args.lambda_poisson}")
     print(f"  设备:        {trainer.device}")
     print(f"  log_dir:     {args.log_dir}")
+    print(f"  cache_dir:   {args.cache_dir or '无（现场仿真）'}")
     print(f"  续训:        {args.resume or '无（全新）'}")
 
     t0 = time.time()
