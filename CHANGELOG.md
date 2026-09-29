@@ -8,6 +8,49 @@
 
 ---
 
+## [v5.0.13-alpha] - 2026-09-30
+
+### V5-030 第二轮：best 选择修复 + 有序监督实验（两轮均恶化，结构性上限确认）
+
+#### 修复
+
+- **best.pt 保存判据 val_loss → val_coverage**（`training/trainer_v5.py`
+  fit()；新增 `best_val_coverage` 状态，resume/检查点兼容，
+  `best_val_loss` 仍记录）。旧训练用 latest 重评严格版：kd0.5 ratio
+  10.15→7.06（确认旧"判据 4 失败"结论被 best 选择污染，但仍远超 1.5）
+- `tests/test_trainer_v5_smoke.py` 断言同步（best_val_coverage）
+
+#### 新增
+
+- `training/ordered_kp_loss.py`：`resample_kpts_arclength`（GT 等弧长
+  重采样到 16 + **方向规范化**：首点 (y,x) 字典序较小端，修复 GT 端到
+  端方向对输入不可学的歧义）、`ordered_kpt_loss`（点对点 Smooth L1）、
+  `validity_loss`（BCE，V5-029 首次监督）；`OrderedKeypointLoss` 加
+  `lambda_ordered`/`lambda_validity`（默认 0，默认行为不变）
+- `run_train_v5.py --lambda_ordered --lambda_validity`（CLI 打通）
+- 诊断脚本：`_diag_kpt_order.py`（顺序诊断：相邻连线角度差）、
+  `_diag_order_dir.py`（方向歧义定量）、`_diag_ordered_mech.py`
+  （ordered loss 水平+方向学习率）
+
+#### 实验结论（V5-030 更新，详见 docs/v5_已知问题.md）
+
+- 顺序诊断：角度差 35°（随机基线 45°）+ 距裂纹 46px——顺序乱与
+  位置偏并存
+- 有序监督两轮训练均恶化判据 4（7.06→10.64→16.79）：v1 败于方向
+  歧义（已修）、v2 方向已学会（95% 规范方向）但 ordered loss 仅
+  0.256→0.215 且 chamfer 被拖垮
+- overfit-32 排除容量（train_loss 0.077 可记忆目标）
+- **结构性结论：全局池化特征 → Linear 头回归 16 点，对细线状裂纹
+  定位精度存在结构上限（所有变体 pred→裂纹 ~40-50px，判据 4 要求
+  ~5px）**——处置三选项（架构升级 / 判据口径复核 / 接受 v5-α 定位）
+  回到用户决策点
+
+#### 回归
+
+- 106/106 通过（含新增方向规范化验证）
+
+---
+
 ## [v5.0.12-alpha] - 2026-09-29
 
 ### V5-028：闭运算四角伪分量修复（GT 口径变更，全量缓存重生成+重训）

@@ -204,6 +204,8 @@ class TrainerV5:
         lambda_gp: float = 0.1,
         lambda_poisson: float = 0.05,
         lambda_kpt_direct: float = 0.5,
+        lambda_ordered: float = 0.0,
+        lambda_validity: float = 0.0,
         use_aug: bool = True,
         seed: int = 42,
         device: str | None = None,
@@ -333,6 +335,8 @@ class TrainerV5:
             lambda_gp=lambda_gp,
             lambda_poisson=lambda_poisson,
             lambda_kpt_direct=lambda_kpt_direct,
+            lambda_ordered=lambda_ordered,
+            lambda_validity=lambda_validity,
             coverage_mode=coverage_mode,
             M=M,
             lambda_position_6d=lambda_position_6d,
@@ -349,6 +353,7 @@ class TrainerV5:
         # 训练状态
         self.start_epoch = 0
         self.best_val_loss = float("inf")
+        self.best_val_coverage = float("inf")
 
     def _train_step(self, batch: dict) -> dict:
         """单步训练"""
@@ -414,6 +419,9 @@ class TrainerV5:
             true_crack_pixels=true_pixels,
             gp_module=gp_module,
             pixel_mask=pixel_mask,
+            true_kpts=true_kpts,
+            kpt_mask=kpt_mask,
+            pred_validity=out.get("validity"),
             true_position_6d=true_position_6d,
             pred_position_6d=out.get("position_6d"),
         )
@@ -423,6 +431,8 @@ class TrainerV5:
         return {
             "loss": losses["total"].item(),
             "coverage": losses["coverage"].item(),
+            "ordered": losses["ordered"].item(),
+            "validity": losses["validity"].item(),
             "bbox": losses["bbox"].item(),
             "gp": losses["gp"].item(),
             "poisson": losses["poisson"].item(),
@@ -438,6 +448,8 @@ class TrainerV5:
         true_bbox = batch["true_bbox"].to(self.device)
         true_pixels = batch["true_crack_pixels"].to(self.device)
         pixel_mask = batch["pixel_mask"].to(self.device)
+        true_kpts = batch["true_keypoints"].to(self.device)
+        kpt_mask = batch["keypoint_mask"].to(self.device)
 
         out = self.model(x_1d, x_2d)
         gp_module = getattr(self.model, "gp_module", None)
@@ -452,6 +464,9 @@ class TrainerV5:
             true_crack_pixels=true_pixels,
             gp_module=gp_module,
             pixel_mask=pixel_mask,
+            true_kpts=true_kpts,
+            kpt_mask=kpt_mask,
+            pred_validity=out.get("validity"),
             true_position_6d=true_position_6d,
             pred_position_6d=out.get("position_6d"),
         )
@@ -466,6 +481,7 @@ class TrainerV5:
         agg = {
             "loss": 0.0, "coverage": 0.0, "bbox": 0.0,
             "gp": 0.0, "poisson": 0.0,
+            "ordered": 0.0, "validity": 0.0,
             "position_6d": 0.0, "uv_projection": 0.0,
         }
         n = 0
@@ -515,9 +531,12 @@ class TrainerV5:
             )
             self.start_epoch = state.get("epoch", 0) + 1
             self.best_val_loss = state.get("best_val_loss", float("inf"))
+            self.best_val_coverage = state.get(
+                "best_val_coverage", float("inf")
+            )
             if verbose:
                 print(f"  [RESUME] 从 epoch {self.start_epoch} 续训，"
-                      f"best_val_loss={self.best_val_loss:.4f}")
+                      f"best_val_coverage={self.best_val_coverage:.4f}")
 
         final = {}
         for epoch in range(self.start_epoch, self.epochs):
@@ -543,9 +562,11 @@ class TrainerV5:
             }
             self.history.log(row)
 
-            # 保存 best checkpoint
-            if val_metrics["loss"] < self.best_val_loss:
-                self.best_val_loss = val_metrics["loss"]
+            # 保存 best checkpoint（V5-030：按 val_coverage 选——val_loss 含
+            # bbox/gp 分量波动，曾把 best 停在 ep44 而 ep150 的 val_coverage 更低，
+            # 判据 4 结论被此污染；coverage 才是判据 4 直接衡量的量）
+            if val_metrics["coverage"] < self.best_val_coverage:
+                self.best_val_coverage = val_metrics["coverage"]
                 best_path = os.path.join(
                     self.log_dir, "checkpoints", "best.pt"
                 )
@@ -553,7 +574,10 @@ class TrainerV5:
                     best_path, self.model, self.optimizer,
                     epoch=epoch, best_val_loss=self.best_val_loss,
                     history_csv=self.csv_path,
-                    extras={"variant": self.variant},
+                    extras={
+                        "variant": self.variant,
+                        "best_val_coverage": self.best_val_coverage,
+                    },
                 )
 
             # 每 save_every epoch 保存 latest
@@ -565,7 +589,10 @@ class TrainerV5:
                     latest_path, self.model, self.optimizer,
                     epoch=epoch, best_val_loss=self.best_val_loss,
                     history_csv=self.csv_path,
-                    extras={"variant": self.variant},
+                    extras={
+                        "variant": self.variant,
+                        "best_val_coverage": self.best_val_coverage,
+                    },
                 )
 
             if verbose:
@@ -582,6 +609,7 @@ class TrainerV5:
                 "last_train_loss": train_metrics["loss"],
                 "last_val_loss": val_metrics["loss"],
                 "best_val_loss": self.best_val_loss,
+                "best_val_coverage": self.best_val_coverage,
             }
 
         return final
