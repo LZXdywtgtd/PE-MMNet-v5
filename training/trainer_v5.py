@@ -411,6 +411,7 @@ class TrainerV5:
             true_bbox=true_bbox,
             true_crack_pixels=true_pixels,
             gp_module=gp_module,
+            pixel_mask=pixel_mask,
             true_position_6d=true_position_6d,
             pred_position_6d=out.get("position_6d"),
         )
@@ -434,6 +435,7 @@ class TrainerV5:
         x_2d = batch["x_2d"].to(self.device)
         true_bbox = batch["true_bbox"].to(self.device)
         true_pixels = batch["true_crack_pixels"].to(self.device)
+        pixel_mask = batch["pixel_mask"].to(self.device)
 
         out = self.model(x_1d, x_2d)
         gp_module = getattr(self.model, "gp_module", None)
@@ -447,6 +449,7 @@ class TrainerV5:
             true_bbox=true_bbox,
             true_crack_pixels=true_pixels,
             gp_module=gp_module,
+            pixel_mask=pixel_mask,
             true_position_6d=true_position_6d,
             pred_position_6d=out.get("position_6d"),
         )

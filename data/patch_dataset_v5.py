@@ -218,24 +218,42 @@ class PatchDatasetV5(Dataset):
         )
 
     def _load_from_npz(self, path: str) -> list[dict]:
-        """从 npz 加载 → 内存缓存"""
+        """从 npz 加载 → 内存缓存
+
+        2026-09-29 修复：原先直接返回 padding 后的定长数组而未读 mask，
+        -1 填充行被当作真实关键点/像素进入 collate，与现算路径（变长）
+        语义不一致。现按 keypoint_mask/pixel_mask 裁剪回变长形状。
+        """
         data = np.load(path)
-        n = data["x_1d"].shape[0]
+        # npz 是 lazy 解压：循环内 data["x_2d"][i] 每次都整组重新解压
+        # （1000 样本 = 200 GB 累计流量 → 分配器碎片化 OOM，2026-09-29）。
+        # 循环外一次性物化全部成员（~330 MB @128px/1000），循环内只切片。
+        members = {k: data[k] for k in data.files}
+        data.close()
+        kpt_mask = members["keypoint_mask"]
+        px_mask = members["pixel_mask"]
         cache = []
-        for i in range(n):
+        for i in range(members["x_1d"].shape[0]):
+            k = int(kpt_mask[i].sum())
+            m = int(px_mask[i].sum())
             sample = {
-                "x_1d": torch.from_numpy(data["x_1d"][i]),
-                "x_2d": torch.from_numpy(data["x_2d"][i]),
-                "true_bbox": torch.from_numpy(data["true_bbox"][i]),
-                "true_keypoints": torch.from_numpy(data["true_keypoints"][i]),
+                "x_1d": torch.from_numpy(members["x_1d"][i]),
+                "x_2d": torch.from_numpy(members["x_2d"][i]),
+                "true_bbox": torch.from_numpy(members["true_bbox"][i]),
+                "true_keypoints": torch.from_numpy(
+                    members["true_keypoints"][i][:k].copy()
+                ),
                 "true_crack_pixels": torch.from_numpy(
-                    data["true_crack_pixels"][i]
+                    members["true_crack_pixels"][i][:m].copy()
                 ),
             }
             # v5-β position_6d
-            if self.use_position_image and "true_position_6d" in data.files:
+            if (
+                self.use_position_image
+                and "true_position_6d" in members
+            ):
                 sample["true_position_6d"] = torch.from_numpy(
-                    data["true_position_6d"][i]
+                    members["true_position_6d"][i]
                 )
             cache.append(sample)
         return cache
@@ -286,13 +304,9 @@ class PatchDatasetV5(Dataset):
 
         x_2d = np.stack([T_field_norm, S_field_norm, H_map], axis=0)
 
-        # bbox：[x1, y1, x2, y2] 归一化
-        bbox_yxyx = result["crack_bbox"].astype(np.float32).copy()
-        bbox_yxyx[0::2] /= H
-        bbox_yxyx[1::2] /= W
-        bbox_xyxy = np.array([
-            bbox_yxyx[1], bbox_yxyx[0], bbox_yxyx[3], bbox_yxyx[2],
-        ], dtype=np.float32)
+        # bbox：仿真器 _mask_to_bbox 已输出归一化 xyxy [x1,y1,x2,y2]，直接用
+        # （2026-09-28 修复双重归一化：原代码再除 H/W 且按 yxyx 换序，导致 bbox 缩水 ~H 倍）
+        bbox_xyxy = result["crack_bbox"].astype(np.float32).copy()
 
         # 关键点：(y, x) 归一化
         kpts = result["crack_keypoints"].astype(np.float32).copy()

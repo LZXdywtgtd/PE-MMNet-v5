@@ -168,20 +168,43 @@ def test_catmull_rom_input_validation():
 # ============================================================
 
 def test_coverage_loss_perfect_fit():
-    """完美匹配：真值像素 = 样条采样点 → loss ≈ 0"""
+    """完美匹配：真值像素 = 全部样条采样点 → loss ≈ 0
+
+    2026-09-29 双向 chamfer 语义更新：原测试取样条采样点的 1/10 子集当真值，
+    单向下正向距离全 0 即通过；双向下其余 90 个样条点到最近真像素有距离
+    （子集版 ≈0.023，这是双向语义的正确行为非回归）。完美拟合的定义相应
+    更新为真值覆盖全部采样点。
+    """
     # 构造一个简单的直线
     t = torch.linspace(0.2, 0.8, 12)
     pred_kpts = torch.stack([t, t], dim=-1).unsqueeze(0)  # (1, 12, 2)
 
-    # 真值像素 = 直线上的点
+    # 真值像素 = 全部样条采样点
     M = 100
-    spline_samples = catmull_rom_spline_torch(pred_kpts, M)
-    # 取子集作为真值像素（保持顺序）
-    true_pixels = spline_samples[:, ::10, :]  # (1, 10, 2)
+    true_pixels = catmull_rom_spline_torch(pred_kpts, M)
 
     loss = coverage_loss(pred_kpts, true_pixels, M=M)
     assert loss.item() < 1e-6, f"完美匹配 loss 应 ≈ 0，实际 {loss.item():.6f}"
     print(f"  [OK] coverage_loss_perfect_fit: loss={loss.item():.2e}")
+
+
+def test_coverage_loss_bidirectional_subset_penalized():
+    """双向语义：真值只是样条子集时，反向项产生正惩罚（≥ 单向值）
+
+    2026-09-29 加入，钉死双向 chamfer 行为：样条上"没有真像素的段"
+    必须被反向项惩罚——这正是堵"摊开覆盖"平凡解的机制。
+    """
+    t = torch.linspace(0.2, 0.8, 12)
+    pred_kpts = torch.stack([t, t], dim=-1).unsqueeze(0)  # (1, 12, 2)
+    M = 100
+    spline_samples = catmull_rom_spline_torch(pred_kpts, M)
+    subset = spline_samples[:, ::10, :]  # (1, 10, 2) 稀疏子集
+
+    loss = coverage_loss(pred_kpts, subset, M=M)
+    assert loss.item() > 1e-3, (
+        f"子集真值在双向 chamfer 下应有正惩罚，实际 {loss.item():.6f}"
+    )
+    print(f"  [OK] coverage_loss_bidirectional_subset_penalized: loss={loss.item():.4f}")
 
 
 def test_coverage_loss_noisy():
@@ -317,9 +340,10 @@ def test_ordered_kp_loss_combines():
     assert losses["gp"].item() == 0.0, \
         f"无 GP 时 gp loss 应为 0，实际 {losses['gp'].item()}"
 
-    # 总和接近各分量加权和
+    # 总和接近各分量加权和（含 2026-09-29 新增的 kpt_direct）
     expected = (
         loss_fn.lambda_coverage * losses["coverage"]
+        + loss_fn.lambda_kpt_direct * losses["kpt_direct"]
         + loss_fn.lambda_bbox * losses["bbox"]
         + loss_fn.lambda_poisson * losses["poisson"]
     )
@@ -402,6 +426,7 @@ def test_ordered_kp_loss_custom_weights():
         lambda_bbox=0.0,
         lambda_gp=0.0,
         lambda_poisson=0.0,
+        lambda_kpt_direct=0.0,
     )
     losses = loss_fn(pred_bbox, pred_kpts, true_bbox, true_pixels)
     assert losses["total"].item() == 0.0, \

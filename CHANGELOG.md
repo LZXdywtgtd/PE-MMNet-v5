@@ -8,6 +8,52 @@
 
 ---
 
+## [v5.0.8-alpha] - 2026-09-29
+
+### 比赛副本回填：监督链路三重修复 + 断点续跑缓存（⚠️ 仿真输出与历史不兼容）
+
+> 来源：assets/pe_mmnet/project_v5（比赛副本，2026-09-24~09-28 期间诊断 v5a6
+> 平台解时修复）。副本层级的路径适配改动（三桥 `../../`）**未回填**——本仓库
+> 目录层级下 `../../../` 本来正确。
+
+#### 修复
+
+- **loss（training/ordered_kp_loss.py + trainer_v5.py）**
+  - mask 透传：trainer 原先算了 `pixel_mask` 但不传 loss_fn，负样本 (-1,-1)
+    padding 全部进入 chamfer（2正6负 batch = 9 万假像素）→ 现必传
+  - 单向 chamfer → 双向：原单向奖励"摊开覆盖"平凡解（边界角点 0.0148 <
+    真关键点 0.0925）；hausdorff 同步改两方向 max
+  - 新增 `kpt_direct`（权重 0.5）：kpts → 最近真像素 L2，修复"样条双重间接
+    监督"的梯度病态。线状子集验证排序恢复：真kpts 0.2282 < 随机 0.3982
+- **data/patch_dataset_v5.py**
+  - kpt_mask/pixel_mask 裁剪变长回填（-1 padding 不再混入样本）
+  - npz members 循环外一次物化：修复 lazy 解压 OOM（117MiB ArrayMemoryError）
+- **data/patch_simulator_v5.py**
+  - 样本多样性随机化（材质 E/α_T ±20%、τ ±30%、h ±30%、ε U(0.85,0.95)、
+    初温噪声 N(0,2℃)）——修复同一 (patch,曲线,dt) 下所有样本物理全同的
+    确定性退化
+  - `max_history_samples=600` deque 截尾：默认曲线 128px 全程 ≈18GB →
+    0.2GB/样本；模型只用末 300 帧 + 最终帧，输出逐位不变（fast 64px 验证）
+
+#### 新增
+
+- `generate_cache_v5.py`：断点续跑仿真缓存生成器（逐样本 chunk 原子写 +
+  多进程 + `--assemble_only` / `--verify` 逐位对比 + `--cache_dir`）
+- `run_train_v5.py --cache_dir` 参数（向后兼容，默认 None）
+
+#### ⚠️ 不兼容说明
+
+- **仿真输出与历史不兼容**：多样性随机化后，同参数重跑仿真结果与
+  2026-09-29 之前的所有缓存/数据集**不可复现、不可混用**。旧缓存一律作废。
+- **本批修复不解决 GT 形态问题**：应力场"边界高中心低"宽平台下，阈值化
+  只能产出满面或空（assets 副本 th=11 下 89% 正样本为满面退化，裂纹像素
+  占 93.85% 面积）。阈值重选必须同时报告 GT 面积占比分布，详见
+  `docs/v5_已知问题.md`。
+- coverage 数值口径变化（单向→双向）：与历史训练日志的 coverage 数字
+  **不可直接对比**。
+
+---
+
 ## [v5.0.7-alpha] - 2026-08-25
 
 ### 文档重整 + v5-β 详细规划（用户反馈："别搞得只有 α 一样"）
@@ -484,7 +530,7 @@ Maxwell update_step 公式多了一个 `(dt/τ)` 因子，导致累计应力被�
 
 **训练命令**（规划）：
 ```bash
-cd D:\team_project\projects\pe_mmnet\project_v5
+cd D:\New_team_project\projects\pe_mmnet\project_v5
 python run_train_v5.py --variant resnet18 --epochs 150 --min_kpts 8 --max_kpts 16
 ```
 
