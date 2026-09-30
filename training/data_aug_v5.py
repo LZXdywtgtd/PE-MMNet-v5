@@ -109,16 +109,16 @@ class PatchAugmentorV5:
         # 随机 90° 旋转（顺时针）
         if random.random() < self.rot90_prob:
             x_2d = torch.rot90(x_2d, k=-1, dims=[-2, -1])
-            # 旋转后 (y, x) → (1-x, y)
+            # 图像顺时针 90°（实测标记点）：(y, x) → (x, 1-y)
             if kpts.shape[0] > 0:
-                kpts_new = np.stack([1.0 - kpts[:, 1], kpts[:, 0]], axis=1)
+                kpts_new = np.stack([kpts[:, 1], 1.0 - kpts[:, 0]], axis=1)
                 kpts = kpts_new
             if pixels.shape[0] > 0:
-                pixels_new = np.stack([1.0 - pixels[:, 1], pixels[:, 0]], axis=1)
+                pixels_new = np.stack([pixels[:, 1], 1.0 - pixels[:, 0]], axis=1)
                 pixels = pixels_new
-            # bbox 旋转: [x1, y1, x2, y2] → [y1, 1-x2, y2, 1-x1]
+            # bbox 旋转: [x1, y1, x2, y2] → [1-y2, x1, 1-y1, x2]
             x1, y1, x2, y2 = bbox
-            new_bbox = np.array([y1, 1.0 - x2, y2, 1.0 - x1], dtype=np.float32)
+            new_bbox = np.array([1.0 - y2, x1, 1.0 - y1, x2], dtype=np.float32)
             bbox = new_bbox
             # 排序：确保 x1 ≤ x2, y1 ≤ y2
             bbox[0], bbox[2] = min(bbox[0], bbox[2]), max(bbox[0], bbox[2])
