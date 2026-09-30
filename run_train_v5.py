@@ -90,6 +90,10 @@ def parse_args() -> argparse.Namespace:
                         help="有序监督权重（V5-030 候选 1）")
     parser.add_argument("--lambda_validity", type=float, default=0.0,
                         help="validity 监督权重（V5-030 候选 1）")
+    parser.add_argument("--spatial_head", action="store_true",
+                        help="启用空间关键点头（V5-030 第三轮最小架构实验）")
+    parser.add_argument("--lambda_heatmap", type=float, default=0.0,
+                        help="heatmap 辅助监督权重（spatial_head 时激活）")
     parser.add_argument("--save_every", type=int, default=1)
     # 设备 / 路径
     parser.add_argument("--device", type=str, default=None,
@@ -139,6 +143,8 @@ def main():
         lambda_kpt_direct=args.lambda_kpt_direct,
         lambda_ordered=args.lambda_ordered,
         lambda_validity=args.lambda_validity,
+        lambda_heatmap=args.lambda_heatmap,
+        spatial_head=args.spatial_head,
         use_aug=not args.no_aug,
         seed=args.seed,
         device=args.device,

@@ -58,9 +58,12 @@ def seg_angle_diff(pred: np.ndarray, gt: np.ndarray) -> float:
 def main():
     ckpt = torch.load(CKPT, map_location="cuda", weights_only=False)
     print(f"ckpt epoch: {ckpt.get('epoch')}")
+    state_keys = ckpt.get("model_state_dict", {}).keys()
+    has_spatial = any(k.startswith("spatial_head.") for k in state_keys)
     model = create_v5_model(
         "resnet18", image_channels=3, image_size=128,
         pretrained_2d=False, use_gp=True, min_kpts=8, max_kpts=16,
+        spatial_head=has_spatial,
     )
     load_checkpoint(CKPT, model, map_location="cuda")
     model.eval().cuda()

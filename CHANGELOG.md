@@ -8,6 +8,71 @@
 
 ---
 
+## [v5.0.14-alpha] - 2026-09-30
+
+### V5-030 第三轮：口径矛盾核实 + 处置裁决 + 最小架构实验（spatial head）
+
+#### 核实（用户指令：先查口径矛盾再下结构结论）
+
+- **kpt_direct 0.021 矛盾核实**：该数字出自安全网时代在**真 GT kpts**
+  上的计算（GT kpts→GT 像素天然贴合）；**模型 pred 的 kpt_direct 实测
+  0.5429≈69.5px**（同 checkpoint 同语义）——"控制点根本贴不上裂纹"
+  成立（非"贴着但顺序乱"），结构上限假设加固。46 vs 69.5px 为逐样本
+  中位数均值 vs 样本均值口径差
+- **DETR 对照取消**：DETR 变体（`set_spatial_output(True)`）无训练
+  产物，零训练对照无意义
+
+#### 裁决（用户拍板）
+
+- 选项 3（v5-α 管线验证定位）：执行，但是**划边界不是终点**
+- 选项 2（判据 4 口径复核）：**否决**——判据 4 是唯一未过的硬指标，
+  保留为架构改进锚点，标注"**v5-β 架构升级后复验**"，阈值 1.5 不变
+- 选项 1（架构升级）：以**最小实验**形式进行（~50 行级）：
+  SplineHead kpt 输入从全局池化向量改为"池化向量+空间特征图"
+
+#### 新增
+
+- `models/spatial_kpt_head.py`：`SpatialKptHead`（16 可学习 query ×
+  64 空间位置 cross-attention，参考点+偏移坐标参数化，2 层
+  TransformerDecoder，2D 正弦位置编码）+ heatmap 辅助头（1×1 conv
+  →8×8 sigmoid，GT mask 下采样逐像素 BCE，pos_weight clamp 50）+
+  `gt_heatmap_target`/`heatmap_loss`
+- `models/pe_tsnet_multimodal_v5.py`：`spatial_head` 参数（开启时
+  `set_spatial_output(True)`，kpts/validity/heatmap 从空间图直接
+  输出，bbox 仍走融合分支）
+- `run_train_v5.py --spatial_head --lambda_heatmap`（CLI 打通）
+
+#### 修复
+
+- **heatmap backward 位置 bug**（`trainer_v5.py _train_step`）：原位于
+  `optimizer.step()` 之后，梯度被下轮 zero_grad 清掉、监督无效——
+  移到 step() 之前并入 total（链路验证：heatmap loss 非零 +
+  heatmap_head 梯度非零）
+- `TrainerV5.__init__`：`use_spatial_head`/`lambda_heatmap` 赋值移到
+  build_kwargs 之前（原顺序 AttributeError）；`spatial_head` 仅对
+  resnet18 变体传入（SwinYOLO 等变体不接受该 kwarg）
+
+#### 回归
+
+- 单元冒烟：SpatialKptHead forward/backward PASS、端到端 1ep 训练
+  PASS、heatmap 梯度链路 PASS
+- 106/106 通过
+
+#### 实验结论（v5a6_dprime_spatial 20ep→150ep，口径对齐 kd0.5 基线）
+
+- 20ep 快照：ratio 15.60/47.8px 表面与基线持平，但**欠训练**（且
+  cross-attention 头收敛远慢于 Linear 头）——**中间诊断发现
+  heatmap 头 rank-AUC 0.900**，空间通路已学会"裂纹在哪"，续训 150ep
+- 150ep A/B：**判据 4 FAIL（ratio 13.73，px 距离 37.4px，未达
+  10px 目标）→ 结构上限确认，作 v5-β 立项依据**
+- **上限位置修正**：37.4px ≈ 4×4 特征图单格 32px + heatmap AUC
+  0.909 → 瓶颈不是"池化丢信息"而是**特征图分辨率粒度**；
+  v5-β 方向：FPN ≥16×16 + heatmap-argmax + offset 精化
+- 判据 3 过（0.0303）、bbox 活性、样条零出界；v5-α 判据 4 标注
+  "v5-β 架构升级后复验"，阈值 1.5 不变
+
+---
+
 ## [v5.0.13-alpha] - 2026-09-30
 
 ### V5-030 第二轮：best 选择修复 + 有序监督实验（两轮均恶化，结构性上限确认）
