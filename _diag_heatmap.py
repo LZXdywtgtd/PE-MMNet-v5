@@ -70,7 +70,7 @@ def main():
                 aucs.append(gt_pos + 0.5 * ties)
                 # precision@k：前 k 个预测单元中 GT 正单元占比
                 order = torch.argsort(p, descending=True)
-                for k, acc in ((5, prec_at_5), (10, acc if False else prec_at_10)):
+                for k, acc in ((5, prec_at_5), (10, prec_at_10)):
                     topk = t[order[:k]]
                     acc.append(topk.sum().item() / min(k, n_pos))
 
