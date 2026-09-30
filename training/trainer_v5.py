@@ -206,6 +206,8 @@ class TrainerV5:
         lambda_kpt_direct: float = 0.5,
         lambda_ordered: float = 0.0,
         lambda_validity: float = 0.0,
+        lambda_heatmap: float = 0.0,
+        spatial_head: bool = False,
         use_aug: bool = True,
         seed: int = 42,
         device: str | None = None,
@@ -317,6 +319,8 @@ class TrainerV5:
 
         # 模型
         # 合并 model_kwargs 和基础参数（避免冲突）
+        self.use_spatial_head = bool(spatial_head)
+        self.lambda_heatmap = lambda_heatmap
         build_kwargs = {
             "image_channels": 3,
             "image_size": patch_size,
@@ -326,6 +330,9 @@ class TrainerV5:
             "min_kpts": min_kpts,
             **self.model_kwargs,
         }
+        # spatial_head 仅 resnet18（PETSNetMultimodalV5）支持，其余变体不传
+        if self.use_spatial_head:
+            build_kwargs["spatial_head"] = True
         self.model = create_v5_model(variant, **build_kwargs).to(self.device)
 
         # 损失（v5-β: 增加 position_6d_loss / uv_projection_loss 占位）
@@ -425,6 +432,16 @@ class TrainerV5:
             true_position_6d=true_position_6d,
             pred_position_6d=out.get("position_6d"),
         )
+        # heatmap 辅助监督并入 total（必须在 step() 之前 backward，
+        # 否则梯度被下轮 zero_grad 清掉、监督无效——V5-030 第三轮）
+        heatmap_val = 0.0
+        hm = out.get("heatmap")
+        if hm is not None and self.lambda_heatmap > 0:
+            from models.spatial_kpt_head import heatmap_loss
+            hm_t = heatmap_loss(hm, pixel_mask, true_pixels)
+            losses["total"] = losses["total"] + self.lambda_heatmap * hm_t
+            heatmap_val = hm_t.item()
+
         losses["total"].backward()
         self.optimizer.step()
 
@@ -433,6 +450,7 @@ class TrainerV5:
             "coverage": losses["coverage"].item(),
             "ordered": losses["ordered"].item(),
             "validity": losses["validity"].item(),
+            "heatmap": heatmap_val,
             "bbox": losses["bbox"].item(),
             "gp": losses["gp"].item(),
             "poisson": losses["poisson"].item(),
@@ -470,9 +488,18 @@ class TrainerV5:
             true_position_6d=true_position_6d,
             pred_position_6d=out.get("position_6d"),
         )
+        # heatmap 辅助（spatial_head 时激活）
+        hm_val = 0.0
+        hm = out.get("heatmap")
+        if hm is not None and self.lambda_heatmap > 0:
+            from models.spatial_kpt_head import heatmap_loss
+            hm_t = heatmap_loss(hm, pixel_mask, true_pixels)
+            hm_val = hm_t.item()
+            losses["total"] = losses["total"] + self.lambda_heatmap * hm_t
         return {
             "loss": losses["total"].item(),
             "coverage": losses["coverage"].item(),
+            "heatmap": hm_val,
         }
 
     def train_epoch(self, epoch: int) -> dict:
@@ -481,7 +508,7 @@ class TrainerV5:
         agg = {
             "loss": 0.0, "coverage": 0.0, "bbox": 0.0,
             "gp": 0.0, "poisson": 0.0,
-            "ordered": 0.0, "validity": 0.0,
+            "ordered": 0.0, "validity": 0.0, "heatmap": 0.0,
             "position_6d": 0.0, "uv_projection": 0.0,
         }
         n = 0

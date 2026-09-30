@@ -72,6 +72,7 @@ class PETSNetMultimodalV5(nn.Module):
         min_kpts: int = 8,
         use_gp: bool = True,
         gp_hidden_dim: int = 128,
+        spatial_head: bool = False,
     ):
         super().__init__()
         if image_channels not in (1, 2, 3, 4):
@@ -138,6 +139,17 @@ class PETSNetMultimodalV5(nn.Module):
             dropout=dropout,
         )
 
+        # 空间关键点头（V5-030 第三轮最小架构实验，默认关）
+        # 全局池化→Linear 头对细线状裂纹定位有结构上限（~40-70px vs 5px），
+        # 本头从 backbone 空间特征图直接定位。
+        self.use_spatial_head = bool(spatial_head)
+        if self.use_spatial_head:
+            from models.spatial_kpt_head import SpatialKptHead
+            self.backbone_2d.set_spatial_output(True)
+            self.spatial_head = SpatialKptHead(
+                in_channels=512, d_model=128, num_queries=max_kpts,
+            )
+
     def forward(self, x_1d: torch.Tensor, x_2d: torch.Tensor) -> dict:
         """
         前向传播
@@ -150,13 +162,21 @@ class PETSNetMultimodalV5(nn.Module):
             dict: 见 SplineHead.forward
         """
         # 2D 分支
-        feat_2d = self.backbone_2d(x_2d)  # (B, 512)
+        feat_2d = self.backbone_2d(x_2d)  # (B, 512)；spatial_head 时 (B, 512, H', W')
+
+        # 空间关键点头（默认关；开启时 kpts/validity 从空间图直接定位）
+        spatial_out = None
+        if self.use_spatial_head:
+            spatial_out = self.spatial_head(feat_2d)
+            feat_2d_vec = feat_2d.mean(dim=(2, 3))  # 空间图 → 池化向量照旧融合
+        else:
+            feat_2d_vec = feat_2d
 
         # 1D 分支
         feat_1d = self.backbone_1d(x_1d)  # (B, 64)
 
         # 融合
-        fused = self.fusion(feat_2d, feat_1d)  # (B, 576)
+        fused = self.fusion(feat_2d_vec, feat_1d)  # (B, 576)
 
         # GP 调制（可选）
         if self.gp_module is not None:
@@ -164,6 +184,12 @@ class PETSNetMultimodalV5(nn.Module):
 
         # 输出头
         out = self.output_head(fused)
+
+        # 空间头输出覆盖 kpts/validity（bbox 仍来自融合分支）
+        if spatial_out is not None:
+            out["keypoints"] = spatial_out["keypoints"]
+            out["validity"] = spatial_out["validity"]
+            out["heatmap"] = spatial_out["heatmap"]
 
         # 附 GP LML（供 OrderedKeypointLoss 用）
         if self.gp_module is not None:
