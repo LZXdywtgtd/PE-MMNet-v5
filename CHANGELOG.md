@@ -8,6 +8,53 @@
 
 ---
 
+## [v5.0.15-alpha] - 2026-10-01
+
+### V5-031：rot90 增广标签 rot180 bug 修复——判据 4 首次 PASS（v5-α 以通过姿态收官）
+
+#### 修复
+
+- `training/data_aug_v5.py` rot90 分支：图像 `torch.rot90(k=-1)`
+  顺时针，标签原按逆时针变换 `(y,x)→(1-x,y)`（合成 rot180）——
+  改为 `(y,x)→(x,1-y)`，bbox 改 `[x1,y1,x2,y2]→[1-y2,x1,1-y1,x2]`
+  +min/max 排序。验证：`_diag_aug_marker.py` 标记点自洽 3/3、
+  106/106 回归过
+- `run_train_v5.py`：`n_samples>=500` 未传 `--cache_dir` 时拒绝
+  启动（augfix1 事故：漏传后静默 stock 训练 150ep，分布错位不可见）
+- `training/trainer_v5.py`：val_coverage 主口径改**仅正样本 batch
+  均值**（coverage_pos）——全负 batch 的 0 曾稀释 val 数字 6.5 倍
+  （stock 12 正样本时 0.0218 假低值，`_diag_stock6x.py` 逐位复现
+  0.021843）；CSV 新增 `val_pos_batch_frac` 列；best 选择同切换
+- `docs/v5b_立项依据.md` 升 **v3**：v2 失败结构分析（双峰/四象限/
+  两簇/79% 方差）整块作废（rot90 污染伪影），主线从"救 42% failed"
+  改为"93%→100% 收尾 + 真实数据泛化"
+
+#### 结果（val 197 正样本同口径）
+
+- 判据 4 ratio **7.05→0.43 PASS**（阈值 1.5，v5-α 首次通过）
+- 逐样本通过率 **0%→94%**（验收线 80%）；failed 率 **42%→0%**
+- 判据 3 inter_var 0.0718→0.2228（3 倍余量）
+- 原镜像代表样本 idx=13：102.7→1.4px、idx=176：86.1→1.5px；
+  learned 组离群点一并消失（32% 顺序错同为 rot180 污染）
+
+#### 作废
+
+- v5-α 第五~九轮的失败结构结论（分层依据/四象限/两簇机制/79%
+  结构/train 同病 35%）——对象为增广污染伪影，方法学保留；
+  "向心收缩"重新定性为镜像错位的几何旁效；顺序监督辅线删除
+- "修复增广后塌缩为平台解"（augfix1 数据错位误判）
+
+#### 新增（诊断脚本）
+
+`_diag_displacement_mode.py`（位移向量判据表→镜像实锤）、
+`_diag_aug_marker.py`（增广同步性实测）、`_diag_augfix_eval.py`、
+`_diag_augfix2_sanity.py`、`_diag_cov_discrepancy.py`（三口径
+对拢 corr=1.000）、`_diag_trainer_val.py`、`_diag_stock6x.py`
+（6 倍稀释裁决+仿真器逐位可复现验证）、`_viz_a1_augfix2.py`
+（修复前后对比图）。可视化：`output/v5b_diag_viz/`。
+
+---
+
 ## [v5.0.14-alpha] - 2026-09-30
 
 ### V5-030 第三轮：口径矛盾核实 + 处置裁决 + 最小架构实验（spatial head）

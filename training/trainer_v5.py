@@ -77,7 +77,7 @@ class CSVHistory:
             "epoch", "train_loss", "train_coverage", "train_bbox",
             "train_gp", "train_poisson",
             "train_position_6d", "train_uv_projection",  # v5-β 钩子列
-            "val_loss", "val_coverage",
+            "val_loss", "val_coverage", "val_pos_batch_frac",
             "lr", "epoch_time_s", "timestamp",
         ]
         # 文件不存在则写表头
@@ -499,6 +499,7 @@ class TrainerV5:
         return {
             "loss": losses["total"].item(),
             "coverage": losses["coverage"].item(),
+            "n_pos_batch": 1 if bool(pixel_mask.any()) else 0,
             "heatmap": hm_val,
         }
 
@@ -525,7 +526,7 @@ class TrainerV5:
     def eval_epoch(self) -> dict:
         """评估一个 epoch"""
         self.model.eval()
-        agg = {"loss": 0.0, "coverage": 0.0}
+        agg = {"loss": 0.0, "coverage": 0.0, "n_pos_batch": 0}
         n = 0
         for batch in self.val_loader:
             step = self._eval_step(batch)
@@ -534,6 +535,17 @@ class TrainerV5:
             n += 1
         for k in agg:
             agg[k] /= max(n, 1)
+        # V5-031 纪律 3：coverage_loss 全负 batch 返回 0 且计入均值，
+        # val_coverage 被正样本率稀释（augfix1 事故：stock 200 仅 12 正，
+        # 38/50 batch 贡献 0 → 0.0218 假低值，_diag_stock6x.py 逐位复现）。
+        # 主口径改为仅正样本 batch 均值；n_pos_batch 同步落 CSV 供核对。
+        pos_frac = agg["n_pos_batch"]
+        if pos_frac > 0:
+            # agg["coverage"] 目前是"含零均值"；换算回仅正样本均值：
+            # sum_cov = agg["coverage"] * n；pos_mean = sum_cov / (pos_frac)
+            agg["coverage_pos"] = (agg["coverage"] * n) / pos_frac
+        else:
+            agg["coverage_pos"] = agg["coverage"]
         return agg
 
     def fit(
@@ -582,7 +594,8 @@ class TrainerV5:
                 "train_position_6d": f"{train_metrics.get('position_6d', 0.0):.6f}",
                 "train_uv_projection": f"{train_metrics.get('uv_projection', 0.0):.6f}",
                 "val_loss": f"{val_metrics['loss']:.6f}",
-                "val_coverage": f"{val_metrics['coverage']:.6f}",
+                "val_coverage": f"{val_metrics['coverage_pos']:.6f}",
+                "val_pos_batch_frac": f"{val_metrics['n_pos_batch']:.4f}",
                 "lr": f"{self.optimizer.param_groups[0]['lr']:.2e}",
                 "epoch_time_s": f"{dt:.2f}",
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -591,9 +604,11 @@ class TrainerV5:
 
             # 保存 best checkpoint（V5-030：按 val_coverage 选——val_loss 含
             # bbox/gp 分量波动，曾把 best 停在 ep44 而 ep150 的 val_coverage 更低，
-            # 判据 4 结论被此污染；coverage 才是判据 4 直接衡量的量）
-            if val_metrics["coverage"] < self.best_val_coverage:
-                self.best_val_coverage = val_metrics["coverage"]
+            # 判据 4 结论被此污染；coverage 才是判据 4 直接衡量的量。
+            # V5-031：用 coverage_pos（仅正样本 batch 口径）——含零口径受
+            # 正样本率稀释，best 选择会随数据集正样本率漂移）
+            if val_metrics["coverage_pos"] < self.best_val_coverage:
+                self.best_val_coverage = val_metrics["coverage_pos"]
                 best_path = os.path.join(
                     self.log_dir, "checkpoints", "best.pt"
                 )
