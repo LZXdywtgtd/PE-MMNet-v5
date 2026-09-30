@@ -112,6 +112,18 @@ def parse_args() -> argparse.Namespace:
 def main():
     args = parse_args()
 
+    # V5-031 纪律 1：n_samples>=500 而不给 cache_dir 时拒绝启动——
+    # 静默现场仿真会生成 stock 分布数据（与 D' 缓存不同分布），
+    # augfix1 事故：150ep 在 stock 上训练，val 数字被负 batch 稀释
+    # 掩盖，训练/评估分布错位不可见（_diag_stock6x.py）。
+    if args.n_samples >= 500 and args.cache_dir is None:
+        raise SystemExit(
+            "[V5-031] n_samples=%d >= 500 但未传 --cache_dir："
+            "将现场仿真 %d 个 stock 样本（无 D' 调制），与历史缓存"
+            "分布不同且不可对齐。确要现场仿真请显式传 "
+            "--cache_dir none_debug（并自担口径不可比）或缩小样本数。"
+            % (args.n_samples, args.n_samples))
+
     # 热曲线（可选加速）
     thermal_profile = None
     if args.fast_thermal:
