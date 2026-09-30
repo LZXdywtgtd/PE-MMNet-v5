@@ -58,18 +58,27 @@
   PASS、heatmap 梯度链路 PASS
 - 106/106 通过
 
-#### 实验结论（v5a6_dprime_spatial 20ep→150ep，口径对齐 kd0.5 基线）
+#### 实验结论（v5a6_dprime_spatial 20ep→150ep→第四轮复核）
 
 - 20ep 快照：ratio 15.60/47.8px 表面与基线持平，但**欠训练**（且
   cross-attention 头收敛远慢于 Linear 头）——**中间诊断发现
   heatmap 头 rank-AUC 0.900**，空间通路已学会"裂纹在哪"，续训 150ep
-- 150ep A/B：**判据 4 FAIL（ratio 13.73，px 距离 37.4px，未达
-  10px 目标）→ 结构上限确认，作 v5-β 立项依据**
-- **上限位置修正**：37.4px ≈ 4×4 特征图单格 32px + heatmap AUC
-  0.909 → 瓶颈不是"池化丢信息"而是**特征图分辨率粒度**；
-  v5-β 方向：FPN ≥16×16 + heatmap-argmax + offset 精化
-- 判据 3 过（0.0303）、bbox 活性、样条零出界；v5-α 判据 4 标注
-  "v5-β 架构升级后复验"，阈值 1.5 不变
+- 150ep A/B：判据 4 FAIL（ratio 13.73，px 距离 37.4px，未达 10px）
+- **第四轮复核（用户质疑 A/B/C 全部成立，推翻初版结论）**：
+  - 分布是**双峰**（baseline：49% 样本 <10px + 42% >60px），
+    "均值≈32px/格"是巧合非分辨率证据
+  - heatmap top16 格子 100% 找回 GT 格子，但 pred 点落 GT 格子仅
+    32%（<随机）——**query 坐标读出未学会**，与格子粗细无关
+  - chamfer 分解：两模型均 bwd 主导；spatial 变差主因=顺序更乱
+    （47.5° vs 35°）样条 zigzag，非梯度打架
+  - **oracle 分辨率曲线**（GT 格子中心折线）：4×4 ratio 3.89 FAIL /
+    **8×8 1.45 贴线 PASS** / 16×16 0.93 PASS——FPN≥8×8 是必要条件，
+    16×16 有余量
+  - 预测 heatmap 格子折线 ratio 15.9 远差于 oracle 3.89——读出/
+    排序是独立瓶颈
+- **修正后结论**：不宣称"结构上限"；v5-β 三件套=①FPN ≥8×8（建议
+  16×16）②换坐标读出机制（heatmap-argmax+offset，query 回归已证伪）
+  ③顺序规范化复用 ordered_kp_loss；判据 4 阈值 1.5 不变，v5-β 复验
 
 ---
 
