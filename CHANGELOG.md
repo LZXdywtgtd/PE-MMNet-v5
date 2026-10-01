@@ -32,7 +32,7 @@ v5-α 收官后根目录堆积 ~90 个文件（60 个 `_` 前缀脚本 + 18 个�
 
 **logs 清理第一档（~3.2GB，用户 2026-10-01 批准）**：删 `logs/training_history/{cli_smoke, cli_test, cli_test2, run_train_v5, smoke_v5a6, v5a5_smoke, v5a5_smoke_resume, v5a6_smoke, resnet18_150ep, v5a6_overfit32, _discard_v5b_s4_seed424243_staleGT, _v5028_pre_regen_bak}` + `logs/sim_cache/_backup_badkpts`。logs/ 11GB → 7.8GB。**v5b_s3/s4/s5 收官产物、v5a6_dprime_* 历史、v5a6_demo 汇报件、sim_cache 全部 npz（新旧键）+ chunks 全保留**。
 
-**文档**：README 目录结构节重写、PROJECT_INDEX.md 升 v3（145 tracked 对账，替换过时的 v2"128 文件 1.72GB"）、legacy_v4/README.md 新建。归档注意：`scripts/_archive/_exp_v5025_cause.py` 等硬编码旧 `_exp_sigma_fields` 路径，复跑需按 `output/exp_fields/` 新家改。
+**文档**：README 目录结构节重写、PROJECT_INDEX.md 升 v3（145 tracked 对账，替换过时的 v2"128 文件 1.72GB"）、legacy_v4/README.md 新建、scripts/README.md 新建（运行方式/导入约定/_diag_aug_marker 待转正地位）、scripts/_archive/README.md 新建（归档件不保证复跑；**6 个 `_exp_*` 硬编码旧场缓存路径**——`_exp_default_curve_{lowth,spot,spot_v2}`、`_exp_field_cache_sweep`、`_exp_rescan_post_v524`、`_exp_v5025_cause`，复跑需按 `output/exp_fields/` 新家改）。
 
 ---
 
