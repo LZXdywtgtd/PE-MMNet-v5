@@ -9,7 +9,7 @@ T4 stock 路径正常（键带 sdgs 标记，临时目录现算 + 二次命中�
 T5 og 标记（gt_frame_strip=False）生成独立键
 """
 import sys, os, functools
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 print = functools.partial(print, flush=True)
 import shutil

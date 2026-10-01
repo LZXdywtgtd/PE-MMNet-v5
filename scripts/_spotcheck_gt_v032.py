@@ -6,8 +6,9 @@
 ③ GT 自洽下界抽查：修复后正样本 GT kpts→GT 像素 chamfer 应贴线上界。
 """
 import sys, os
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts", "lib"))
 import functools
 print = functools.partial(print, flush=True)
 import numpy as np

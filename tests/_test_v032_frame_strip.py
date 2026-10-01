@@ -10,7 +10,7 @@
   T6 端到端：真仿真器 σ 场 + 人工抬边框 → 剥离后 kpts 与团块自洽
 """
 import sys, os
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 import functools
 print = functools.partial(print, flush=True)
@@ -88,8 +88,8 @@ out = PatchSimulator._strip_boundary_frame(m, ndimage)
 check("输出空", int(out.sum()) == 0)
 
 print("T6 端到端：真 σ 场（idx=144 同 seed）+ 剥框后 kpts 自洽")
-from _dprime_generator import (DPrimePatchSimulator, spikes_for_seed,
-                               FAST_PROFILE)
+from data._dprime_generator import (DPrimePatchSimulator, spikes_for_seed,
+                                    FAST_PROFILE)
 s_cfg = spikes_for_seed(434242 + 144)
 simr = DPrimePatchSimulator(patch_size=128, spikes=s_cfg,
                             crack_stress_threshold_MPa=60.0,
