@@ -363,6 +363,12 @@ class PatchSimulator:
             # 无裂纹：返回空 mask（不影响训练）
             return mask * 255
 
+        # 1.5 物理边界应力框剥离占位（V5-032）——实际剥离在步骤 5.5
+        # （闭运算后）：阈值化后的原始框仅 1px 厚（2px 判据不触发，
+        # 首版在此处剥离被 binary_closing 的 dilation 重新加厚进场，
+        # 重生成实测 val 仍 7/197 污染）。闭运算后框恒 ≥2px，判据可测。
+        mask = self._strip_boundary_frame(mask, ndimage)
+
         # 2. 连通域标记
         labeled, n_features = ndimage.label(mask)
 
@@ -392,7 +398,59 @@ class PatchSimulator:
             )
             mask = (labeled2 == int(np.argmax(sizes2)) + 1).astype(np.uint8)
 
+        # 5.5 物理边界应力框剥离（V5-032 主剥离点，2026-10-01 尾部 7%
+        # 诊断实锤）：Robin 边界恒有高应力框（边界热流几何），D' 调制
+        # 提升任意一边 h 后框可越过 th=60。闭运算 border_value=1 的
+        # dilation 把框连接团块 → 骨架沿框走 → kpts 与团块脱节，GT
+        # 自洽下界超阈（L 形组 p50=0.3012 vs 阈 0.0441），题目无解。
+        # 实测旧缓存 val 11/197（全 T+L）/train 37/994。
+        # 判据（单条件，首版双条件实测失效）：外边线覆盖 ≥0.9*N 即
+        # 框边——闭运算对 2px 框 erosion 削回 1px，内邻行仅 8px 覆盖，
+        # "边+内邻行"双条件永不触发（第三次重生成 val 7/train 22）。
+        # 安全性：D' 调制段 ≤2/3 边长（85px），真裂纹不可能满铺整边。
+        # ≥2 条则剥四边 2px + 重新取主分量。
+        mask = self._strip_boundary_frame(mask, ndimage)
+
         return mask * 255
+
+    @staticmethod
+    def _strip_boundary_frame(mask: np.ndarray, ndimage) -> np.ndarray:
+        """检测并剥离物理边界应力框（V5-032）。
+
+        框边判据：边线（行0/行127/列0/列127）覆盖 ≥0.9*N 即为框边。
+        首版曾要求紧邻内侧行/列也 ≥0.9*N（防误杀），但实测闭运算
+        （border_value=1）对 2px 框 dilation 后 erosion 削回 1px——
+        框恒 1px、内侧仅 8px 覆盖，双条件永不触发（第三次重生成
+        仍 val 7/train 22 污染）。删内邻条件的安全性：D' 调制段
+        ≤2/3 边长（85px < 116），真裂纹不可能满铺 ≥90% 整边，
+        满铺整边的唯一机制是 Robin 边界几何框。
+        ≥2 条框边（任意组合）→ 判为边界框污染，剥离四边各 2px 后
+        重取主连通域；不足 2 条 → 原样返回（单边调制升一条边不出
+        框；贴边真裂纹段长不足）。
+        """
+        n = mask.shape[0]
+        need = int(np.ceil(n * 0.9))
+        edges = [
+            mask[0, :].sum() >= need,
+            mask[n - 1, :].sum() >= need,
+            mask[:, 0].sum() >= need,
+            mask[:, n - 1].sum() >= need,
+        ]
+        if sum(edges) < 2:
+            return mask
+        stripped = mask.copy()
+        stripped[0:2, :] = 0
+        stripped[n - 2:, :] = 0
+        stripped[:, 0:2] = 0
+        stripped[:, n - 2:] = 0
+        if stripped.sum() == 0:
+            # 整个 mask 就是框：按定义无裂纹
+            return np.zeros_like(mask)
+        labeled, nf = ndimage.label(stripped)
+        if nf > 1:
+            sizes = ndimage.sum(stripped, labeled, range(1, nf + 1))
+            stripped = (labeled == int(np.argmax(sizes)) + 1).astype(np.uint8)
+        return stripped
 
     def _extract_keypoints(
         self, crack_mask: np.ndarray

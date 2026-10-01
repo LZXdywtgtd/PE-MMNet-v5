@@ -100,6 +100,11 @@ def parse_args() -> argparse.Namespace:
                         help="cuda / cpu（None = 自动）")
     parser.add_argument("--log_dir", type=str, default="logs/training_history/run_train_v5")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--train_seed", type=int, default=None,
+                        help="训练随机性种子（默认=seed）。数据/缓存键"
+                             "恒用 --seed；换训练种子时必传此参数，"
+                             "否则缓存键含 seed 会 miss → 静默现场仿真"
+                             "stock 数据（V5-033）")
     # 续训
     parser.add_argument("--resume", type=str, default=None,
                         help="检查点路径（None = 全新训练）")
@@ -159,6 +164,7 @@ def main():
         spatial_head=args.spatial_head,
         use_aug=not args.no_aug,
         seed=args.seed,
+        train_seed=args.train_seed,
         device=args.device,
         log_dir=args.log_dir,
         thermal_profile=thermal_profile,
