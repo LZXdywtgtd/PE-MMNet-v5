@@ -210,6 +210,7 @@ class TrainerV5:
         spatial_head: bool = False,
         use_aug: bool = True,
         seed: int = 42,
+        train_seed: int | None = None,
         device: str | None = None,
         log_dir: str = "logs/training_history/v5a5_smoke",
         thermal_profile: dict | None = None,
@@ -236,6 +237,11 @@ class TrainerV5:
         self.M = M
         self.use_aug = use_aug
         self.seed = seed
+        # V5-033：train_seed 与数据 seed 分离。缓存键含数据 seed——换
+        # 训练随机性时若不分离，缓存 miss → 静默现场仿真 stock 数据
+        # （augfix1 事故模式）。train_seed 只影响 set_seed（权重初始化/
+        # DataLoader shuffle/增广随机），数据侧恒用 seed 保缓存命中。
+        self.train_seed = train_seed if train_seed is not None else seed
         self.log_dir = log_dir
         self.save_every = save_every
         self.model_kwargs = model_kwargs or {}
@@ -279,8 +285,8 @@ class TrainerV5:
         else:
             self.device = torch.device(device)
 
-        # 随机种子
-        set_seed(seed)
+        # 随机种子（train_seed 只管训练随机性，数据侧用 seed）
+        set_seed(self.train_seed)
 
         # 数据集（v5-β: 支持 npz 缓存 + position_6d 字段）
         dataset_kwargs = dict(
