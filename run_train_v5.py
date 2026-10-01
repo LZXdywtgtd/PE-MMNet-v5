@@ -73,6 +73,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--crack_stress_threshold_MPa", type=float, default=50.0)
     parser.add_argument("--cache_dir", type=str, default=None,
                         help="仿真 npz 缓存目录（命中则零仿真）")
+    parser.add_argument("--dprime", action="store_true",
+                        help="D' 边界调制 GT（generate_cache_v5.py --dprime "
+                             "产出）。数据变体标记进缓存键（V5-033 P0）："
+                             "dprime 键 miss 直接报错，拒绝 stock 顶替")
     parser.add_argument("--no_aug", action="store_true", help="禁用数据增强")
     # 训练
     parser.add_argument("--epochs", type=int, default=10)
@@ -171,6 +175,7 @@ def main():
         crack_stress_threshold_MPa=args.crack_stress_threshold_MPa,
         save_every=args.save_every,
         cache_dir=args.cache_dir,
+        data_variant="dprime" if args.dprime else "stock",
         model_kwargs={"pretrained_2d": args.pretrained_2d},
     )
 
@@ -208,6 +213,11 @@ def main():
     print(f"  设备:        {trainer.device}")
     print(f"  log_dir:     {args.log_dir}")
     print(f"  cache_dir:   {args.cache_dir or '无（现场仿真）'}")
+    print(f"  数据变体:    {'dprime（外部生成器 GT）' if args.dprime else 'stock（现场仿真可复现）'}")
+    if trainer.train_ds._cache_file is not None:
+        hit = os.path.exists(trainer.train_ds._cache_file)
+        print(f"  缓存文件:    {trainer.train_ds._cache_file}")
+        print(f"  缓存状态:    {'命中' if hit else 'MISS → 现场仿真（stock）'}")
     print(f"  续训:        {args.resume or '无（全新）'}")
 
     t0 = time.time()
