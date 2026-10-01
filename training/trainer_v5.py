@@ -181,6 +181,8 @@ class TrainerV5:
         ---- v5-β 钩子（默认 None/False，v5-α 完全不启用） ----
         data_source: "simulation"（v5-α 默认）/ "real"（v5-β 真实数据）
         cache_dir: 仿真 npz 磁盘缓存目录（v5-β V5B6）
+        data_variant: 数据变体标记进缓存键（V5-033 P0）："stock"（现算
+          可复现）/ "dprime"（外部生成器 GT，缓存 miss 直接报错）
         use_position_image: 是否注入位置图像分支（v5-β V5B4）
         use_uv_inverse: 是否注入 UV 逆映射（v5-β V5B1）
         lambda_position_6d: 位置 6D loss 权重（v5-β）
@@ -220,6 +222,7 @@ class TrainerV5:
         # ---- v5-β 钩子（默认禁用） ----
         data_source: str = "simulation",
         cache_dir: str | None = None,
+        data_variant: str = "stock",
         use_position_image: bool = False,
         use_uv_inverse: bool = False,
         lambda_position_6d: float = 0.0,
@@ -249,6 +252,7 @@ class TrainerV5:
         # ---- v5-β 钩子 ----
         self.data_source = data_source
         self.cache_dir = cache_dir
+        self.data_variant = data_variant
         self.use_position_image = use_position_image
         self.use_uv_inverse = use_uv_inverse
         self.lambda_position_6d = lambda_position_6d
@@ -300,6 +304,7 @@ class TrainerV5:
             data_source=data_source,
             use_position_image=use_position_image,
             cache_dir=cache_dir,
+            data_variant=data_variant,
         )
         self.train_ds = PatchDatasetV5(**dataset_kwargs)
         # 验证集：同 seed 偏移（数据不同）
