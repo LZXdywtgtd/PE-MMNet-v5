@@ -4,9 +4,10 @@
 >
 > 基于深度学习的日用陶瓷热震裂纹**轨迹**实时预测系统
 >
-> 版本：5.0.7-alpha | 更新：2026-08-25
+> 版本：5.0.17 | 更新：2026-10-01
 >
-> v5 系列分两阶段：**v5-α**（MVP，算法骨架验证）+ **v5-β**（真实 3D 数据接入）
+> v5 系列分两阶段：**v5-α**（MVP，算法骨架验证，**已收官**——干净 GT
+> 口径基线 197/197=100%，5 seed 全 100%）+ **v5-β**（真实 3D 数据接入）
 
 ---
 
@@ -127,6 +128,30 @@
 | **文档审查** | [文档审查指南.md](docs/文档审查指南.md) |
 
 > v5-α 文档**完全独立**，**无需查阅 v4 docs**。每个文档顶部"继承说明"段注明与 v4 的关系。
+
+---
+
+## 目录结构（2026-10-01 重组）
+
+```
+project_v5/
+├── run_train_v5.py  team_train_v5.py  generate_cache_v5.py   # v5 生产入口
+├── data/           # 仿真器 + 数据集 + _dprime_generator（D' 生产依赖）
+├── models/ training/ utils/            # 模型 / 训练器 / 工具
+├── tests/          # pytest 单测（test_*.py）+ 手工验证件（_test_*.py，指名运行）
+├── scripts/        # 活跃评估/诊断入口（_eval_s*、_spotcheck、_diag_* 等）
+│   ├── lib/        # 共享库（_diag_variance79 / _diag_v5b_direction2 / _viz_common）——被导入，不直接跑
+│   └── _archive/   # 历史一次性脚本 + 过夜日志（诊断结论已落 CHANGELOG/演进史；不保证可直接复跑）
+├── legacy_v4/      # v4 时代入口（run_train.py / launcher.py 等，v5 不用，历史参照）
+├── tools/          # crack_annotator 等在用工具（v4 GUI 件已移 legacy_v4/tools/）
+├── docs/           # v5 全部文档
+├── logs/           # 训练产物 + sim_cache（gitignored）
+└── output/exp_fields/  # 实验期 σ 场 / 默认曲线场缓存（gitignored，_dprime_generator 自检②引用）
+```
+
+- 脚本文件名**一律未改**——立项文档 §九 / CHANGELOG 按文件名索引的引用全部有效。
+- `scripts/_archive/` 内脚本按归档时原样保留（含旧相对路径），复现请走 git 历史。
+- 手工验证件运行方式：`python tests/_test_v033_cache_key.py`（下划线开头，pytest 不收集）。
 
 ---
 
