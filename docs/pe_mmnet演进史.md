@@ -100,7 +100,7 @@ pe_mmnet v2 是最典型的教训：孤立地看 v2（R²=0.9829、推理 0.85ms
   v5-α 定位=**管线验证**（v5_范围说明 §一，真实物理在 v5-β）→ 口径=fast+D'+th60 全量生成中；H/V 限制=接受+标注；默认曲线线状 GT 归入 v5-β（需仿真器升级，V5-025）。验收判据四条（线状占比≥60% 且绝对数≥300、bbox 跨象限≥3/4、跨输入方差≥1e-3、chamfer≤上界×1.5）见 `projects/pe_mmnet/project_v5/docs/v5_已知问题.md` V5-021——前两条已在 100 样本统计过判据，后两条待重训后严格版验证。
 - monitor 仓库 git 历史含明文凭据（清洗需单独决策）；assets 副本建议标注冻结。
 - ~~V5A6（5 变体完整训练评估）~~ **已完成（2026-10-01，第十一轮）**：resnet18 先行闭环（干净 GT 100%+5 seed 全 100%），5 变体全扫结论=resnet18 足够（架构辅线结案，见第十一轮）。
-- **V5-033 P0**：缓存键加数据变体标记（D'/剥框/th hash 进 `_cache_filename`）——根治 augfix1 与缓存错位两次事故的共同根因。
+- ~~V5-033 P0~~ **已根治（2026-10-01 上午，v3.2.1）**：`_cache_filename` 键改 `p{}_n{}_s{}_t{}_{dp|sd}{gs|og}_h{th}`（数据变体 dp=dprime/sd=stock + GT 口径 gs=V5-032 剥框/og=剥框前 + th 短 hash 全进键）；数据集新增 `data_variant`/`gt_frame_strip` 参数，**dprime 键 miss 直接 FileNotFoundError 拒绝 stock 顶替**（dprime 无 cache_dir 同拒）——事故模式从"靠纪律防"改为"结构上不可能"；`generate_cache_v5.py` assemble 改用同一把键函数（删除手工 `_dp` 后缀补丁，后缀法即根因）；`run_train_v5.py` 新增 `--dprime` + 启动横幅打印缓存命中状态；收官缓存迁移到新键 `dpgs_h60.0`（旧文件保留供 10 个评估脚本）。验证 `_test_v033_cache_key.py` 5/5 + 数据集/trainer 冒烟 + `--dprime` CLI 探针（train/val 双命中，994 正样本）全 PASS。**§八.4"训练前人工核验 GT 口径"纪律随之作废**（结构保证替代人工纪律）；复跑收官口径须加 `--dprime`（缺省 stock，反向错位同样不可能）。
 - **V5-033 P1**：判据 3 评估口径修正（跨输入方差，过夜评估误用同输入重复前向）。
 - **V5-034（P2）**：idx=101 GT 骨架崩塌修复（不阻塞 v5-β）。
 
