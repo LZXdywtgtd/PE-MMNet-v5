@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """阶段 5 闸门：5 变体对照表（干净 GT 缓存，同 seed 424242）。"""
 import sys, os
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts", "lib"))
 import functools
 print = functools.partial(print, flush=True)
 import numpy as np
