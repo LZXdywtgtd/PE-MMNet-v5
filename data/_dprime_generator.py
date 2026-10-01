@@ -29,7 +29,7 @@ from __future__ import annotations
 import os
 import sys
 
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
@@ -203,7 +203,7 @@ def selftest(n_bits: int = 5) -> bool:
 
     # ② σ 场逐位复现：与 _exp_sigma_fields 缓存对比
     _print("[selftest②] seed 4200-4204 σ_max 场 vs 实验缓存逐位对比")
-    fld_dir = os.path.join(PROJECT_ROOT, "_exp_sigma_fields")
+    fld_dir = os.path.join(PROJECT_ROOT, "output", "exp_fields", "_exp_sigma_fields")
     for i in range(n_bits):
         seed = 4200 + i
         ref_path = os.path.join(fld_dir, f"seed_{seed}.npy")

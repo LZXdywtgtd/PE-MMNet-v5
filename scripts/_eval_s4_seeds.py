@@ -5,8 +5,9 @@
 新 seed 424243-424246 = v5b_s4_seed*（--train_seed 分离，数据同 424242）。
 """
 import sys, os
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts", "lib"))
 import functools
 print = functools.partial(print, flush=True)
 import numpy as np
