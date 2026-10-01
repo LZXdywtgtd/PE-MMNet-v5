@@ -8,6 +8,34 @@
 
 ---
 
+## [v5.0.17-alpha] - 2026-10-01
+
+### 结构重组：根目录归位 + logs 清理第一档（文件名一律未改）
+
+v5-α 收官后根目录堆积 ~90 个文件（60 个 `_` 前缀脚本 + 18 个过夜日志 + 3 个实验数据目录），本轮按"活不活"分类归位；**只动目录不改文件名**——立项文档 §九 / CHANGELOG 按文件名索引的引用全部有效。
+
+**移动映射**（git mv 保历史）：
+
+| 去 | 件 |
+|---|---|
+| `scripts/`（活跃入口 13） | `_eval_s3_gtfix/_eval_s3_dp/_eval_s4_seeds/_eval_s5_variants`、`_spotcheck_gt_v032`、`_v5a6_demo`、`_diag_augfix2_sanity/_diag_augfix_eval/_diag_cov_discrepancy/_diag_displacement_mode/_diag_stock6x/_diag_trainer_val/_diag_aug_marker` |
+| `scripts/lib/`（共享库 3） | `_diag_variance79`、`_diag_v5b_direction2`、`_viz_common`（被导入不直接跑，库间裸名互导不变） |
+| `scripts/_archive/`（历史 62） | v5-α 十一轮 `_diag_*`/`_exp_*`/`_viz_*`/bench/smoke 全量 + 过夜 .log×18 + results.jsonl×2 + `_eval_criteria34` + 杂件；**按归档原样保留，不保证直接复跑**（复现走 git 历史） |
+| `data/`（生产依赖 1） | `_dprime_generator.py`（`generate_cache_v5.py --dprime` 懒导入改 `from data._dprime_generator import …`；PROJECT_ROOT 两级 dirname；自检②σ 场路径同步，见下） |
+| `legacy_v4/`（v4 入口 8） | `run_train.py`、`launcher.py`、`team_train.py`、`train_launcher.py`、`verify_checkpoints.py`、`run.bat`、`run.ps1` + `tools/batch_train_gui.py`（同目录自洽；README 说明"v5 不用，历史参照"） |
+| `tests/`（手工验证件 2） | `_test_v032_frame_strip`（T6 改 `from data._dprime_generator import …`）、`_test_v033_cache_key`（下划线开头 pytest 不收集，指名运行） |
+| `output/exp_fields/`（实验场缓存 3 目录） | `_exp_sigma_fields`、`_exp_default_curve_fields{,_v2}`（gitignored 纯 mv；`data/_dprime_generator.py` 自检②同步改新路径） |
+
+**路径/import 修复**（只动移动了的活跃件；`logs/sim_cache` 硬编码路径一个未改——旧缓存文件保留）：
+- scripts/ 13 + scripts/lib/ 3 + tests/ 2：`PROJECT_ROOT` 公式加一层 `os.path.dirname`（lib/ 两层）
+- 导共享库的 9 个入口：加 `sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts", "lib"))`
+
+**logs 清理第一档（~3.2GB，用户 2026-10-01 批准）**：删 `logs/training_history/{cli_smoke, cli_test, cli_test2, run_train_v5, smoke_v5a6, v5a5_smoke, v5a5_smoke_resume, v5a6_smoke, resnet18_150ep, v5a6_overfit32, _discard_v5b_s4_seed424243_staleGT, _v5028_pre_regen_bak}` + `logs/sim_cache/_backup_badkpts`。logs/ 11GB → 7.8GB。**v5b_s3/s4/s5 收官产物、v5a6_dprime_* 历史、v5a6_demo 汇报件、sim_cache 全部 npz（新旧键）+ chunks 全保留**。
+
+**文档**：README 目录结构节重写、PROJECT_INDEX.md 升 v3（145 tracked 对账，替换过时的 v2"128 文件 1.72GB"）、legacy_v4/README.md 新建。归档注意：`scripts/_archive/_exp_v5025_cause.py` 等硬编码旧 `_exp_sigma_fields` 路径，复跑需按 `output/exp_fields/` 新家改。
+
+---
+
 ## [v5.0.16-alpha] - 2026-10-01
 
 ### V5-032/V5-033：GT 1px 边框剥除修复 + 训练缓存键错位根治——干净 GT 口径 v5-α 正式收官
