@@ -73,10 +73,30 @@
 结构性不收敛（val_loss 最低点=ep1，需专门 query 初始化/匹配策略，
 不能据此下"架构差"结论）；patchtst 无增益。
 
+#### V5-033 P0 根治（同日完成）：缓存键数据变体标记
+
+- `data/patch_dataset_v5.py` `_cache_filename` 键改为
+  `p{n}_n{n}_s{seed}_t{thash}_{dp|sd}{gs|og}_h{th}`——dp（dprime）/
+  sd（stock）+ gs（V5-032 剥框口径）/og（剥框前旧口径）进键，th 值
+  改短 hash。数据集新增 `data_variant` / `gt_frame_strip` 参数
+- **dprime 键 miss 直接 FileNotFoundError，拒绝现场仿真 stock 顶替**；
+  `data_variant='dprime'` 无 cache_dir 同样拒绝——事故模式从
+  "靠纪律防"改为"结构上不可能"
+- `generate_cache_v5.py` assemble 侧改用同一把键函数，删除手工
+  `_dp` 后缀补丁（后缀法正是训练链错位的根因）
+- `run_train_v5.py` 新增 `--dprime`；启动横幅打印实际缓存文件与
+  命中/MISS 状态（训练加载了什么数据可见）
+- 收官缓存迁移：干净 `_dp` npz 复制为新键
+  `sim_cache_p128_n1000_s424242_t6eb66e1b_dpgs_h60.0.npz`（val
+  同理），旧文件保留（10 个评估脚本仍按旧路径引用）
+- 验证 `_test_v033_cache_key.py` 5/5：新键命中且与旧 `_dp` 逐位
+  一致、dprime miss 报错、dprime 无 cache_dir 报错、stock 现算+命中
+  一致（键含 sdgs）、gs/og 独立键；数据集冒烟 + trainer 冒烟 +
+  `--dprime` CLI 探针（train/val 双命中，994 正样本）全 PASS
+
 #### 已知遗留（V5-033 候选项，用户已排优先级）
 
-- P0：缓存键加数据变体标记（D'/剥框/th hash 进 `_cache_filename`）——
-  augfix1 与本次错位的共同根因，根治项
+- ~~P0：缓存键加数据变体标记~~ **已完成**（本版本内，见上）
 - P1：判据 3 评估口径修正（原判据为跨输入方差，过夜脚本误用同输入
   重复前向——eval 模式恒 0）
 - P2（列 V5-034）：idx=101 GT 骨架崩塌（kpts 崩塌在 2×7px 角落而
