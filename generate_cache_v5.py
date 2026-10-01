@@ -147,13 +147,14 @@ def assemble(args, chunk_dir: str) -> str:
     from data.patch_dataset_v5 import _cache_filename
 
     th = thermal_profile_hash(args.thermal_profile)
+    # V5-033 P0：键由 _cache_filename 统一生成（变体标记进键），
+    # 不再手工补 _dp 后缀——旧后缀法正是训练链错位加载的根因
     cache_name = _cache_filename(
         args.patch_size, args.n_samples, args.seed,
         th, args.crack_stress_threshold_MPa,
+        data_variant="dp" if args.dprime else "sd",
+        gt_frame_strip=True,
     )
-    if getattr(args, "dprime", False):
-        # D' 物理与 stock 不同（同 seed 同参数下），防与 stock 缓存撞名
-        cache_name = cache_name.replace(".npz", "_dp.npz")
     out_path = os.path.join(args.cache_dir, cache_name)
     if os.path.exists(out_path):
         print(f"[assemble] 已存在，跳过: {out_path}")

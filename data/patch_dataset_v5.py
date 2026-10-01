@@ -16,9 +16,11 @@ v5-α patch 数据集（V5A5 + V5-β 钩子 + V5B6 npz 缓存）
 - data_source: "simulation"（v5-α 默认）/ "real"（v5-β 真实数据）
 - use_position_image: bool — 注入 position_6d (B,6) 字段
 - cache_dir: str | None — 仿真结果 npz 磁盘缓存（V5B6）
-  * 缓存键：{patch_size, n_samples, seed, thermal_hash} → cache_dir/sim_cache_{hash}.npz
-  * 命中缓存时跳过仿真（速度提升 10×）
-  * h5py 未安装时使用 npz（等效但单文件 vs 切片访问稍慢）
+  * 缓存键：{patch_size, n_samples, seed, thermal_hash, threshold,
+    数据变体标记 dp/sd+gs} → cache_dir/sim_cache_{payload}.npz
+  * 变体标记（V5-033 P0）：键不含数据语义 = 静默错位（augfix1/
+    V5-033 两次事故根因），故 dp（D'）/sd（stock）与剥框版本 gs
+    必须进键；dprime 键 miss 时报错，拒绝现场仿真 stock 冒充
 
 注：
 - v5-α 不需要真实 3D 数据；仿真数据已足够训练算法骨架
@@ -55,12 +57,31 @@ def _thermal_profile_hash(thermal_profile: dict) -> str:
     return hashlib.md5(payload.encode("utf-8")).hexdigest()[:8]
 
 
+# 数据变体标记（V5-033 P0）：键缺数据语义 → 静默错位（augfix1 用
+# stock 数据训了 150ep；V5-033 剥框前旧 GT 被训练链加载）。标记必须
+# 进键，且外部生成器数据（dprime）键 miss 时拒绝现场仿真兜底——
+# 数据集现算只会产出 stock，用 stock 冒充 dprime 正是事故模式本身。
+# gs = gt_frame_strip（V5-032 剥框版 GT）；后续 GT 修复追加新标记。
+_DP_TAG = "dp"       # dprime 边界调制 GT（_dprime_generator 产出）
+_STOCK_TAG = "sd"    # stock 现场仿真（数据集现算唯一能产出的变体）
+
+
 def _cache_filename(
     patch_size: int, n_samples: int, seed: int,
     thermal_hash: str, threshold: float,
+    data_variant: str = _STOCK_TAG, gt_frame_strip: bool = True,
 ) -> str:
-    """缓存文件名（包含所有影响仿真结果的参数）"""
-    payload = f"p{patch_size}_n{n_samples}_s{seed}_t{thermal_hash}_th{threshold}"
+    """缓存文件名（包含所有影响仿真结果的参数 + 数据变体标记）
+
+    V5-033 P0：th 值曾用明文（60.0），现并入变体段哈希；
+    data_variant 区分 dprime/stock；gt_frame_strip 标记剥框版本
+    （V5-032 修复后恒 True，False=剥框前旧 GT 口径）。
+    """
+    frame = "gs" if gt_frame_strip else "og"
+    payload = (
+        f"p{patch_size}_n{n_samples}_s{seed}_t{thermal_hash}"
+        f"_{data_variant}{frame}_h{threshold}"
+    )
     return f"sim_cache_{payload}.npz"
 
 
@@ -89,6 +110,11 @@ class PatchDatasetV5(Dataset):
         data_source: "simulation"（v5-α）/ "real"（v5-β 占位）
         use_position_image: bool — 注入 true_position_6d 字段（v5-β 占位）
         cache_dir: str | None — 仿真 npz 磁盘缓存目录（v5-β V5B6）
+        ---- V5-033 数据变体 ----
+        data_variant: 缓存键变体标记。"stock"（默认，现场仿真可复现）/
+          "dprime"（外部生成器 GT，只允许命中缓存）
+        gt_frame_strip: GT 是否为 V5-032 剥框口径（默认 True；
+          False 仅用于复现旧口径，会写入 og 标记键）
     """
 
     def __init__(
@@ -109,6 +135,9 @@ class PatchDatasetV5(Dataset):
         data_source: str = "simulation",
         use_position_image: bool = False,
         cache_dir: str | None = None,
+        # ---- V5-033 数据变体 ----
+        data_variant: str = "stock",
+        gt_frame_strip: bool = True,
     ):
         super().__init__()
         self.patch_size = patch_size
@@ -126,6 +155,19 @@ class PatchDatasetV5(Dataset):
         self.data_source = data_source
         self.use_position_image = use_position_image
         self.cache_dir = cache_dir
+        # V5-033
+        if data_variant not in ("stock", "dprime"):
+            raise ValueError(
+                f"data_variant 应为 'stock' / 'dprime'，实际 {data_variant!r}"
+            )
+        if data_variant == "dprime" and cache_dir is None:
+            raise ValueError(
+                "[V5-033] data_variant='dprime' 必须配 cache_dir："
+                "dprime GT 只能来自磁盘缓存，无缓存目录时本数据集"
+                "只会现场仿真 stock 数据，冒充 dprime 即 augfix1 事故模式"
+            )
+        self.data_variant = data_variant
+        self.gt_frame_strip = gt_frame_strip
 
         # 物量单位（米）
         self.physical_size_cm = 5.0
@@ -139,8 +181,24 @@ class PatchDatasetV5(Dataset):
             fname = _cache_filename(
                 patch_size, n_samples, seed, thermal_hash,
                 crack_stress_threshold_MPa,
+                data_variant=_DP_TAG if self.data_variant == "dprime"
+                else _STOCK_TAG,
+                gt_frame_strip=self.gt_frame_strip,
             )
             self._cache_file = os.path.join(cache_dir, fname)
+            # dprime 数据集现算产不出（现算只有 stock）→ miss 即拒绝，
+            # 杜绝 stock 冒充 dprime（augfix1 / V5-033 事故模式）
+            if (
+                self.data_variant == "dprime"
+                and not os.path.exists(self._cache_file)
+            ):
+                raise FileNotFoundError(
+                    f"[V5-033] dprime 缓存未命中且不可现场仿真："
+                    f"{self._cache_file} 不存在。dprime GT 只能由 "
+                    f"generate_cache_v5.py --dprime 产出后 assemble；"
+                    f"请先核对缓存文件名/参数（seed/th/剥框标记），"
+                    f"缺失时用生成器补齐——绝不静默用 stock 数据顶替。"
+                )
 
         # 预计算缓存
         self._cache: list[dict] | None = None
@@ -156,6 +214,7 @@ class PatchDatasetV5(Dataset):
             self._cache = self._load_from_npz(self._cache_file)
             return
 
+        # stock 现场仿真（无缓存时唯一合法路径）；dprime 已在 __init__ 拒绝
         self._cache = []
         for idx in range(self.n_samples):
             if self.verbose:
