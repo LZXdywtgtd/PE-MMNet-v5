@@ -8,6 +8,91 @@
 
 ---
 
+## [v5.0.16-alpha] - 2026-10-01
+
+### V5-032/V5-033：GT 1px 边框剥除修复 + 训练缓存键错位根治——干净 GT 口径 v5-α 正式收官
+
+过夜五阶段串行执行（剥框修复→重生成→重训→5 seed→5 变体），全程闸门记录见
+`logs/overnight_progress.log`。
+
+#### V5-032：GT 1px 边框逃逸修复（尾部 7% 终因）
+
+- **根因**：真实 σ 场阈值化后 GT 含四条完整 1px 边框（行0/127、列0/127
+  全满）；`binary_closing(border_value=1)` 闭运算 dilation 加厚到 2px
+  后 erosion 削回 1px（border_value=1 只保边行）——"边+内邻行都≥116px"
+  双保险判据永不触发（行1 仅 8px），L 形/边框污染漏网
+- **修复**：`data/patch_simulator_v5.py` `_strip_boundary_frame` 改
+  **单边判据**：单边覆盖 ≥90%（116px）即框边，≥2 条触发剥四边 2px +
+  重取主分量。物理安全依据：D' 调制段 ≤2/3 边长（85px<116px），
+  真裂纹不可能满铺 ≥90% 整边，满铺唯一机制是 Robin 几何框
+- **验证**：`_test_v032_frame_strip.py` 9/9（含 T3b 单边不剥场景）；
+  全量重生成 1000+200 后 `_spotcheck_gt_v032.py` 污染 0（val 197/
+  train 994 全干净）；106 回归无损
+- 过程教训：首版双条件判据失效、try3 stale chunks（mv 因备份目录
+  已存在同名子目录静默失败，`2>/dev/null` 掩盖）——均记录在
+  overnight log
+
+#### V5-033：训练缓存键无数据变体标记（augfix1 同款事故模式的第二次实锤）
+
+- **发现**：`PatchDatasetV5._cache_filename` 键只含 p/n/s/t/th，无 D'
+  后缀——训练链恒加载【无后缀】npz；实测无后缀 npz 与 dp npz 的
+  x_2d 逐位一致（都是 D' 图像）但 **GT 恰 11/200 不同**（=旧 L 形
+  污染名单）→ **历史全部训练（含 augfix2 的 93%）用的都是剥框前
+  旧 GT**；L 形样本模型全败的根因=学的就是框上走的 GT
+- **换血修复**：旧无后缀 npz 备份为 OLDGT_ 前缀（`_backups/
+  sim_cache_v031_pre_framestrip/`），干净 dp npz 复制为无后缀名
+  （零代码风险）；**缓存键加变体标记列为 V5-033 P0 待做**
+- **`--train_seed` 落地**：`training/trainer_v5.py` 拆分 data seed
+  （缓存键/dataset）与 train_seed（权重初始化/shuffle/增广），
+  `run_train_v5.py` 加参数透传——防换训练 seed 时缓存键含 seed
+  miss → 静默现场仿真 stock 数据（augfix1 事故模式）
+
+#### 结果（干净 GT 口径，val 197 正样本，阈 5.64px）
+
+| 口径 | 通过率 | chamfer p50 | max | failed60 |
+|---|---|---|---|---|
+| 基线 seed424242（best ep138） | **197/197=100%** | 1.60px | 3.76px | 0 |
+| 4 新训练 seed 424243-46 | **全部 100%** | 1.55–1.60px | 3.63–4.18px | 0 |
+| 5 seed 通过率分布 | min=max=100%，σ=0 | — | — | — |
+
+**v5-α 正式收官**：主线 resnet18 干净 GT 100% + 5 seed 全 100% +
+判据 4 PASS（ratio 0.426–0.441）。
+
+#### 5 变体对照表（同 seed、各 150ep、干净 GT）
+
+| 变体 | best ep | 通过率 | p50 | max | failed60 |
+|---|---|---|---|---|---|
+| resnet18(基线) | 138 | 100.0% | 1.60px | 3.76px | 0 |
+| swin_yolo | 29 | 99.5% | 2.31px | 5.74px | 0 |
+| vit_yolo | 40 | 100.0% | 1.81px | 5.48px | 0 |
+| detr | 1 | 0.0% | 50.9px | 74.6px | 34 |
+| swin_yolo_patchtst | 11 | 98.5% | 2.74px | 7.35px | 0 |
+
+结论（非闸门式，v5-β 主线已定 resnet18）：resnet18 足够；swin/vit
+同水平但收敛更早且尾段过拟合（1000 样本小数据）；detr 现配置
+结构性不收敛（val_loss 最低点=ep1，需专门 query 初始化/匹配策略，
+不能据此下"架构差"结论）；patchtst 无增益。
+
+#### 已知遗留（V5-033 候选项，用户已排优先级）
+
+- P0：缓存键加数据变体标记（D'/剥框/th hash 进 `_cache_filename`）——
+  augfix1 与本次错位的共同根因，根治项
+- P1：判据 3 评估口径修正（原判据为跨输入方差，过夜脚本误用同输入
+  重复前向——eval 模式恒 0）
+- P2（列 V5-034）：idx=101 GT 骨架崩塌（kpts 崩塌在 2×7px 角落而
+  mask 蔓延 101×29px；双向 chamfer 被大团块主导稀释，pred 学到真
+  团块形态却被坏 GT 放行）——不阻塞 v5-β
+- P3（暂缓）：detr 调参、patchtst 早停重评
+
+#### 新增（评估/测试脚本）
+
+`_eval_s3_gtfix.py`、`_eval_s3_dp.py`（sed 生成）、
+`_eval_s4_seeds.py`（5-seed 分布表）、`_eval_s5_variants.py`
+（5 变体对照表）、`_test_v032_frame_strip.py`（剥框标记测试 9/9）、
+`_spotcheck_gt_v032.py`（全量 L 形扫描+GT 自洽下界）。
+
+---
+
 ## [v5.0.15-alpha] - 2026-10-01
 
 ### V5-031：rot90 增广标签 rot180 bug 修复——判据 4 首次 PASS（v5-α 以通过姿态收官）
