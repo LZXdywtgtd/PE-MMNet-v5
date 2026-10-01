@@ -82,7 +82,7 @@ def generate_one(idx: int, cfg: dict) -> str:
             # D' 边界调制路线（fast 口径管线验证，V5-025）：
             # _dprime_generator.generate_dprime_sample 复刻 _generate_sample
             # 打包逻辑；安全网②已证 σ 场与实验缓存逐位一致
-            from _dprime_generator import generate_dprime_sample
+            from data._dprime_generator import generate_dprime_sample
 
             sample = generate_dprime_sample(
                 idx, seed_base=cfg["seed"],

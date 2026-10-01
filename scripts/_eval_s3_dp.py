@@ -6,8 +6,9 @@
 阈值 1.5（chamfer ≤ 0.0441）；判据 3 跨输入方差 ≥1e-3。
 """
 import sys, os
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts", "lib"))
 import functools
 print = functools.partial(print, flush=True)
 import numpy as np
