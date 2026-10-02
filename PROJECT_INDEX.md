@@ -87,12 +87,12 @@
 
 > 2026-10-02：原 1/2/3 三项已清偿（P1 判据 3 重测 0.1191 PASS、
 > V5-034 生成器已修复、aug_marker 已转正 tests/test_aug_marker.py），
-> 见 CHANGELOG v5.0.18。V5-034 缓存侧（idx=101/956 坏 GT 是否重生成）
-> 留用户拍板。
+> 见 CHANGELOG v5.0.18。**V5-034 缓存侧用户已拍板不重生成**——
+> idx=101（val）/956（train）是已知坏 GT（生成器已修、缓存冻结，
+> 污染率 2/1200=0.17%），v5-β 换缓存窗口时自动解决。
 
-1. **V5-034 缓存侧拍板**：缓存 npz 中 idx=101（val）/956（train）坏 GT 是冻结历史产物；重生成会改动收官 100% 基线锚定数据集
-2. **scripts/_archive/ 归档件复跑**：6 个 `_exp_*` 硬编码旧 `_exp_sigma_fields` 路径（清单见 scripts/_archive/README.md）——复跑需先按 `output/exp_fields/` 新家改
-3. **_backups/ 1.1GB**：用户备份，是否瘦身由用户决定
+1. **scripts/_archive/ 归档件复跑**：6 个 `_exp_*` 硬编码旧 `_exp_sigma_fields` 路径（清单见 scripts/_archive/README.md）——复跑需先按 `output/exp_fields/` 新家改
+2. **_backups/ 1.1GB**：用户备份，是否瘦身由用户决定
 
 ## 关联资产
 
