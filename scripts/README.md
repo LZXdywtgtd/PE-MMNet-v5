@@ -10,6 +10,9 @@ scripts/
 └── README.md
 ```
 
+> `_diag_aug_marker.py` 已于 2026-10-02 转正为 `tests/test_aug_marker.py`（V5-031 守护，pytest 3 项）。
+> 另有 `scripts/_diag_v034_idx101.py`（V5-034 一次性诊断，已结案，保留作档案）。
+
 ## 运行方式
 
 从项目根运行（PROJECT_ROOT 已按两级 dirname 自定位，与 cwd 无关）：
@@ -27,9 +30,3 @@ python scripts/_v5a6_demo.py              # 物理因果链汇报演示
 - `lib/` 内部互导保持裸名（`from _diag_variance79 import …`），依赖 lib 在 sys.path 上。
 - 若写新脚本既导 lib 又导 `scripts/` 平层的其他活跃脚本，需第三个 sys.path 条目
   （`PROJECT_ROOT/scripts`）——目前无此用例。
-
-## 待转正
-
-`_diag_aug_marker.py`（增广标记点自洽性测试，rot90 修复 V5-031 的守护）：
-立项文档 §四建议转正式单测——转正时改名 `tests/test_aug_marker.py` 一并动作。
-它现在按**活跃诊断脚本**对待（3/3 PASS 可随时跑），不是归档件。
