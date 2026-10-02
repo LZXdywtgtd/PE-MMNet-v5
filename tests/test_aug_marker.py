@@ -1,15 +1,18 @@
 # -*- coding: utf-8 -*-
 """增广器标记点自洽性测试：图像变换与标签变换是否同步（实测，不靠方向记忆）。
 
+V5-031 转正（原 scripts/_diag_aug_marker.py）：任何新增广的准入门槛——
+立项文档 §五"图像/标签变换同步性测试应成为任何新增广的准入门槛"。
+
 方法：x_2d 放单个亮点（argmax 可定位），kpts=[同一点]，
 分别强制 hflip / vflip / rot90（概率写死 0/1），比较
   图像亮点的实际新位置 (argmax)
 vs
   标签 kpts 的新位置。
-一致 = 增广自洽；不一致 = 图像/标签错位（训练监督被污染）。
+一致 = 增广自洽；不一致 = 图像/标签错位（训练监督被污染，V5-031 rot90 教训）。
 """
-import sys
 import os
+import sys
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
@@ -56,15 +59,28 @@ def one_test(name, **probs):
     return ok
 
 
-def main():
+def _check_sync(name, **probs):
+    ok = one_test(name, **probs)
+    assert ok, f"{name}: 图像/标签变换错位（增广不自洽）"
+
+
+def test_hflip_sync():
+    _check_sync("hflip", hflip_prob=1.0, vflip_prob=0.0, rot90_prob=0.0)
+
+
+def test_vflip_sync():
+    _check_sync("vflip", hflip_prob=0.0, vflip_prob=1.0, rot90_prob=0.0)
+
+
+def test_rot90_sync():
+    _check_sync("rot90", hflip_prob=0.0, vflip_prob=0.0, rot90_prob=1.0)
+
+
+if __name__ == "__main__":
     n_ok = 0
     n_ok += one_test("hflip", hflip_prob=1.0, vflip_prob=0.0, rot90_prob=0.0)
     n_ok += one_test("vflip", hflip_prob=0.0, vflip_prob=1.0, rot90_prob=0.0)
     n_ok += one_test("rot90", hflip_prob=0.0, vflip_prob=0.0, rot90_prob=1.0)
     print(f"\n{'ALL PASS' if n_ok == 3 else f'FAIL {3-n_ok}/3 错位'}"
           f"（{n_ok}/3 自洽）")
-    return 0 if n_ok == 3 else 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(0 if n_ok == 3 else 1)
