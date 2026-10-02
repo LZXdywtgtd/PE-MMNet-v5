@@ -498,8 +498,21 @@ class PatchSimulator:
         endpoints = self._find_endpoints(skeleton)
 
         if len(endpoints) >= 2:
-            # 4. 沿骨架追踪从端点 1 到端点 2 的最长路径
-            path = self._trace_path(skeleton, endpoints[0], endpoints[1])
+            # 4. 沿骨架追踪最长路径。V5-034：端点>2 时不能盲取前两个——
+            #    idx=101 骨架 4 端点，贪心选中同角落短枝对 (0,117)/(0,123)，
+            #    BFS 仅 7 步错过 114 点主干（GT kpts 压成 2×7px）。
+            #    改为两两欧氏距离取最远点对（最长路径的可靠代理）。
+            from itertools import combinations
+
+            if len(endpoints) == 2:
+                e1, e2 = endpoints
+            else:
+                e1, e2 = max(
+                    combinations(endpoints, 2),
+                    key=lambda p: (p[0][0] - p[1][0]) ** 2
+                    + (p[0][1] - p[1][1]) ** 2,
+                )
+            path = self._trace_path(skeleton, e1, e2)
         else:
             # 端点不足：取所有骨架点
             path = list(zip(ys, xs))

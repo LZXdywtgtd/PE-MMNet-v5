@@ -63,13 +63,9 @@ for ck in (CKPT, CKPT_LATEST):
     bad = sorted(chams, key=lambda t: -t[1])[:8]
     print(f"最差 8: {[(i, round(c,1)) for i, c in bad]}")
     if ck == CKPT:
-        # 判据 3：跨输入方差（同款口径：同 batch 重复输入 5 次的 kpt 方差）
-        x2 = torch.from_numpy(d["x_2d"][:4]).float().cuda()
-        x1 = torch.from_numpy(d["x_1d"][:4]).float().cuda()
-        outs = []
-        with torch.no_grad():
-            for _ in range(5):
-                outs.append(m(x1, x2)["keypoints"])
-        inter_var = torch.stack(outs).var(dim=0).mean().item()
+        # 判据 3：跨输入方差——全部样本预测的 batch 维方差（原始口径
+        # _eval_criteria34.py preds.var(axis=0)；P1 修正前误用同输入
+        # 重复前向，eval 确定性恒 0）
+        inter_var = torch.from_numpy(preds).float().var(dim=0).mean().item()
         print(f"判据 3 inter_var={inter_var:.4f}（阈 ≥1e-3）")
 d.close()
