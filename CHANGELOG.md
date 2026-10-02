@@ -8,6 +8,54 @@
 
 ---
 
+## [v5.0.18-alpha] - 2026-10-02
+
+### v5-β 前三遗留清偿：P1 判据 3 口径修正 + aug_marker 转正 + V5-034 生成器修复
+
+收官后挂账的三件事，v5-β 立项前一次清完。
+
+#### P1：判据 3"跨输入方差"口径修正 + 重测
+
+- **缺陷**：立项文档 §六.3 判据 3 原口径是"全部样本预测的 batch 维
+  方差"（`_eval_criteria34.py preds.var(axis=0)`），但 v5.0.16 收官
+  评估脚本误实现为"同 4 输入重复前向 5 次求方差"——eval 确定性下
+  恒 0，判据 3 实际从未被真正测过
+- **修正**：`scripts/_eval_s3_gtfix.py` / `_eval_s3_dp.py` 改回原始
+  口径 `preds.var(axis=0).mean()`（200 样本预测对 batch 维求方差，
+  度量不同输入间 kpt 响应差异）
+- **重测结果**：best.pt（ep138，锚定 v5b_s3_gtfix_dp）→
+  **inter_var=0.1191 PASS（阈 ≥1e-3，119 倍余量）**；
+  逐样本通过率 197/197=100%、chamfer p50=1.60px、ratio=0.426
+  不变；latest.pt（ep149）同口径过。判据 4 与收官数字一致，无回归
+- 立项文档 §五/§六.3"待 P1 修正评估脚本后重测"悬案就此落定
+
+#### aug_marker 转正式单测
+
+- `scripts/_diag_aug_marker.py` → `git mv tests/test_aug_marker.py`
+  （V5-031 rot90 错位教训的准入门槛——立项文档 §五明文"任何新增广
+  的准入门槛"）
+- `main()` 改 pytest 风格：`test_hflip_sync` / `test_vflip_sync` /
+  `test_rot90_sync` 三项断言；独立运行模式保留
+- pytest 106 → **109**（+3）
+
+#### V5-034：生成器端点贪心选对缺陷修复（生成器侧闭环）
+
+- **根因落定**：`data/patch_simulator_v5.py` `_extract_keypoints`
+  盲取 `endpoints[0]/endpoints[1]`——idx=101 骨架 4 端点，贪心选中
+  同角落短枝对 (0,117)/(0,123)，BFS 仅 7 步错过 114 点主干（GT
+  kpts 压成 2×7px）。裂纹物理层无 bug
+- **修复**：端点选择改"两两欧氏距离取最远点对"
+  （itertools.combinations；≤4 端点时代价可忽略）
+- **爆炸半径**：val 200 样本端点>2 且崩塌仅 idx=101；train 1000
+  样本仅 idx=956——**修复恰好只影响这 2 个样本**；修复后两者
+  kpts 行覆盖均 100%
+- **回归**：pytest 109/109 + cache_key 5/5 + frame_strip 全过
+- **遗留说明**：缓存 npz 中 idx=101/956 的坏 GT 是冻结历史产物，
+  修复只改未来生成；是否重生成缓存（会改动收官 100% 基线锚定
+  数据集）留用户拍板。详见 docs/v5_已知问题.md V5-034
+
+---
+
 ## [v5.0.17-alpha] - 2026-10-01
 
 ### 结构重组：根目录归位 + logs 清理第一档（文件名一律未改）

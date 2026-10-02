@@ -54,7 +54,7 @@
 
 | 子区 | 内容 | 性质 |
 |---|---|---|
-| `scripts/` 平层（13 入口） | `_eval_s3_gtfix/_eval_s3_dp/_eval_s4_seeds/_eval_s5_variants`（收官评估）、`_spotcheck_gt_v032`（GT 验收）、`_diag_augfix2_sanity/_diag_augfix_eval/_diag_cov_discrepancy/_diag_displacement_mode/_diag_stock6x/_diag_trainer_val`（活跃诊断）、`_diag_aug_marker`（增广自洽——**活跃诊断脚本，待转正单测**，转正时改名 tests/test_aug_marker.py）、`_v5a6_demo`（汇报演示） | **可直接跑**：PROJECT_ROOT 已改两级 dirname；导 lib 的 9 个已加 `sys.path.insert(..., "scripts/lib")`；导入约定见 scripts/README.md |
+| `scripts/` 平层（12 入口） | `_eval_s3_gtfix/_eval_s3_dp/_eval_s4_seeds/_eval_s5_variants`（收官评估）、`_spotcheck_gt_v032`（GT 验收）、`_diag_augfix2_sanity/_diag_augfix_eval/_diag_cov_discrepancy/_diag_displacement_mode/_diag_stock6x/_diag_trainer_val`（活跃诊断）、`_v5a6_demo`（汇报演示） | **可直接跑**：PROJECT_ROOT 已改两级 dirname；导 lib 的 9 个已加 `sys.path.insert(..., "scripts/lib")`；导入约定见 scripts/README.md |
 | `scripts/lib/`（3 库） | `_diag_variance79`（CKPT_BASE/VAL_CACHE/PX/geom_features…）、`_diag_v5b_direction2`（cham_of/UPPER/gt_cells_of/REQ…）、`_viz_common`（字体/加载/推理公共件） | **被导入不直接跑**；库间裸名互导原样保留 |
 | `scripts/_archive/`（62 件） | v5-α 十一轮诊断/实验/可视化全量历史：`_diag_*` 15、`_exp_*` 18、`_viz_*` 4、bench/smoke 5、过夜 .log 18、results.jsonl 2、`_eval_criteria34`、_gt_vis.txt、_diag_variance79_vis.png | **一次性历史件**：按归档原样保留（含旧相对路径，不保证直接复跑）；结论已落 CHANGELOG/演进史，复现走 git 历史；**6 个 `_exp_*` 硬编码旧场缓存路径**，复跑需按 `output/exp_fields/` 改——清单见 scripts/_archive/README.md |
 
@@ -85,11 +85,14 @@
 
 ## 遗留待办
 
-1. **判据 3 评估口径修正（P1）**：过夜 `_eval_s3_*.py` 误用同输入重复前向 → 修正后重测干净 GT 基线（立项文档 §六.3）
-2. **V5-034 idx=101 GT 骨架崩塌（P2）**：不阻塞 v5-β
-3. **`_diag_aug_marker.py` 转正式单测**（立项文档 §四建议，转正时一并改名 test_*.py）
-4. **scripts/_archive/ 归档件复跑**：6 个 `_exp_*` 硬编码旧 `_exp_sigma_fields` 路径（清单见 scripts/_archive/README.md）——复跑需先按 `output/exp_fields/` 新家改
-5. **_backups/ 1.1GB**：用户备份，是否瘦身由用户决定
+> 2026-10-02：原 1/2/3 三项已清偿（P1 判据 3 重测 0.1191 PASS、
+> V5-034 生成器已修复、aug_marker 已转正 tests/test_aug_marker.py），
+> 见 CHANGELOG v5.0.18。V5-034 缓存侧（idx=101/956 坏 GT 是否重生成）
+> 留用户拍板。
+
+1. **V5-034 缓存侧拍板**：缓存 npz 中 idx=101（val）/956（train）坏 GT 是冻结历史产物；重生成会改动收官 100% 基线锚定数据集
+2. **scripts/_archive/ 归档件复跑**：6 个 `_exp_*` 硬编码旧 `_exp_sigma_fields` 路径（清单见 scripts/_archive/README.md）——复跑需先按 `output/exp_fields/` 新家改
+3. **_backups/ 1.1GB**：用户备份，是否瘦身由用户决定
 
 ## 关联资产
 
