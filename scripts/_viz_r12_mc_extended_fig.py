@@ -508,6 +508,76 @@ elif WHICH == "zab5":
     print(f"fig -> {pOut}")
     print("DONE zab5 可视化")
 
+elif WHICH == "epsiter":
+    sd = np.load(os.path.join(OUT, "mc_ext_eps10_iter.npz"),
+                 allow_pickle=False)
+    cmax = sd["ctrl_maxes"]; smax = sd["seg_maxes"]
+    mx = sd["curve_maxes"]; n = len(mx)
+    fig, (axL, axR) = plt.subplots(1, 2, figsize=(11.8, 4.8))
+    fig.patch.set_facecolor("white")
+    rs = np.arange(1, n + 1)
+    axL.plot(rs, mx, color=C["ink"], lw=2.2, marker="o", ms=7,
+             label="曲线 max（=段中点 max）")
+    axL.plot(rs, cmax, color=C["aqua"], lw=2, marker="s", ms=6,
+             label="控制点 max（单调降）")
+    axL.axhline(0.245, color=C["blue"], lw=1.2, ls=(0, (4, 3)))
+    axL.text(n - 0.4, 0.222, "P3b 单次预热 0.245", fontsize=8,
+             color=C["blue"], ha="right")
+    axL.axhline(0.1, color=C["red"], lw=1, ls=(0, (4, 3)))
+    axL.text(0.94, 0.115, "盆地判据 0.1", color=C["red"], fontsize=8.5,
+             ha="right")
+    axL.set_xticks(rs)
+    axL.set_xlabel("预热轮次（每轮 150 步，Adam 动量重置）", fontsize=10,
+                   color=C["sec"])
+    axL.set_ylabel("loss", fontsize=10, color=C["sec"])
+    axL.set_ylim(0, 1.05)
+    axL.set_title("迭代预热不收敛：max 在 0.41~0.95 振荡\n"
+                  "（'多预热几次就能压到盆地'被否定）",
+                  fontsize=11.5, color=C["ink"])
+    axL.grid(True, color=C["grid"], linewidth=0.6)
+    axL.legend(fontsize=8.5, frameon=False, loc="upper center")
+    axL.spines[["top", "right"]].set_visible(False)
+    axL.spines[["left", "bottom"]].set_color(C["axis"])
+    axL.tick_params(colors=C["mut"], labelsize=9)
+
+    segs = np.arange(1, 7)
+    shades = [C["blue"], C["blue"], C["aqua"], C["aqua"],
+              C["orange"], C["red"]]
+    for r in range(n):
+        part = np.load(os.path.join(
+            OUT, f"mc_ext_eps10_iter_part{r+1}.npz"))
+        axR.plot(segs, part["segmid_losses"], lw=1.4, alpha=0.8,
+                 marker="o", ms=4,
+                 color=[C["blue"], C["aqua"], C["yellow"],
+                        C["orange"], C["magenta"]][r],
+                 label=f"轮 {r+1}（max {smax[r]:.2f}）")
+    axR.axhline(0.1, color=C["red"], lw=1, ls=(0, (4, 3)))
+    axR.text(0.98, 0.115, "盆地判据 0.1", color=C["red"], fontsize=8.5,
+             ha="right", transform=axR.transAxes)
+    axR.set_xticks(segs)
+    axR.set_xlabel("折线段编号（第 6 段 = 连向 RI 端点的末段）",
+                   fontsize=10, color=C["sec"])
+    axR.set_ylabel("段中点 loss", fontsize=10, color=C["sec"])
+    axR.set_yscale("log")
+    axR.set_title("反弹位置分层：前 4 段 0.02~0.07（盆内），\n"
+                  "末 2 段 0.17~0.95（擦台）——固定不随轮次消除",
+                  fontsize=11.5, color=C["ink"])
+    axR.grid(True, color=C["grid"], linewidth=0.6, which="both")
+    axR.legend(fontsize=8, frameon=False, loc="upper left")
+    axR.spines[["top", "right"]].set_visible(False)
+    axR.spines[["left", "bottom"]].set_color(C["axis"])
+    axR.tick_params(colors=C["mut"], labelsize=9)
+
+    fig.suptitle("P3c 迭代预热（ε=10% × 5 轮）：末段擦台是折线参数化的"
+                 "固有属性——中点非优化变量，端点优化无法消除",
+                 fontsize=12.5, color=C["ink"], y=1.00)
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    pOut = os.path.join(OUT, "figI_eps10_iter.png")
+    fig.savefig(pOut, dpi=110)
+    plt.close(fig)
+    print(f"fig -> {pOut}")
+    print("DONE P3c 可视化")
+
 elif WHICH == "epsscan":
     sd = np.load(os.path.join(OUT, "mc_ext_epsscan.npz"), allow_pickle=False)
     epss = sd["eps_list"] * 100
