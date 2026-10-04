@@ -435,6 +435,79 @@ elif WHICH == "5ri":
     print(f"fig -> {pOut}")
     print("DONE P2b 可视化")
 
+elif WHICH == "zab5":
+    sd = np.load(os.path.join(OUT, "mc_ext_zab5.npz"), allow_pickle=False)
+    pairs = list(sd["pairs"]); seeds = list(sd["seeds"])
+    l_proj = sd["l_proj"]; z_frac = sd["z_frac"]
+    uniq_p = ["AB", "AC"]
+    cols = {"AB": C["blue"], "AC": C["orange"]}
+    marks = {"AB": "o", "AC": "s"}
+    fig, (axL, axR) = plt.subplots(1, 2, figsize=(11.8, 4.8))
+    fig.patch.set_facecolor("white")
+    for pi, pname in enumerate(uniq_p):
+        for ri in range(len(pairs)):
+            if pairs[ri] != pname:
+                continue
+            lbl = (f"{pname}-s{seeds[ri]}" if pi == 0 else None)
+            axL.plot(np.arange(1, 6), z_frac[ri] * 100,
+                     color=cols[pname], lw=1.6 if seeds[ri] == 4242 else 1.1,
+                     alpha=1.0 if seeds[ri] == 4242 else 0.75,
+                     marker=marks[pname], ms=5, label=lbl)
+    axL.axhspan(0.5, 1.0, color=C["aqua"], alpha=0.10)
+    axL.text(0.06, 0.94, "判据带 0.5~1.0%", fontsize=8,
+             color=C["aqua"], transform=axL.transAxes)
+    axL.set_xticks(np.arange(1, 6))
+    axL.set_xlabel("中间控制点编号", fontsize=10, color=C["sec"])
+    axL.set_ylabel("z 位移（% 中心范数）", fontsize=10, color=C["sec"])
+    axL.set_title("10 run 的 z 位移：5 条线几乎完全重叠\n"
+                  "（跨 opt_seed 数字差异 <0.002pp）",
+                  fontsize=11.5, color=C["ink"])
+    axL.grid(True, color=C["grid"], linewidth=0.6)
+    axL.legend(fontsize=8.5, frameon=False, loc="lower right",
+               title="AB（AC 同构，图例略）", title_fontsize=8)
+    axL.spines[["top", "right"]].set_visible(False)
+    axL.spines[["left", "bottom"]].set_color(C["axis"])
+    axL.tick_params(colors=C["mut"], labelsize=9)
+
+    xs, ys, cs, ms = [], [], [], []
+    for ri in range(len(pairs)):
+        for j in range(l_proj.shape[1]):
+            xs.append(pairs[ri] + f"-s{seeds[ri]}")
+            ys.append(l_proj[ri, j])
+    order = np.argsort(ys)[::-1]
+    xs = [xs[i] for i in order]; ys = [ys[i] for i in order]
+    axR.scatter(range(len(ys)), ys, s=26,
+                color=[cols[x.split("-")[0]] for x in xs], zorder=3)
+    axR.axhspan(0.3, 1.1, color=C["aqua"], alpha=0.10)
+    axR.text(0.02, 0.32, "判据带 0.3~1.1", fontsize=8,
+             color=C["aqua"], transform=axR.transAxes)
+    axR.axhline(0.1, color=C["red"], lw=1, ls=(0, (4, 3)))
+    axR.text(0.5, 0.14, "主判据 0.1", color=C["red"], fontsize=8.5)
+    every = max(1, len(ys) // 10)
+    axR.set_xticks(range(0, len(ys), every))
+    axR.set_xticklabels([xs[i] for i in range(0, len(ys), every)],
+                        fontsize=7, rotation=30)
+    axR.set_ylabel("投影回平面后 loss", fontsize=10, color=C["sec"])
+    axR.set_title("50 个投影回弹点：全部落 barrier 量级判据带\n"
+                  "（0.7% 出平面位移 <-> 回弹，跨 10 run 稳定）",
+                  fontsize=11.5, color=C["ink"])
+    axR.grid(True, axis="y", color=C["grid"], linewidth=0.6)
+    axR.spines[["top", "right"]].set_visible(False)
+    axR.spines[["left", "bottom"]].set_color(C["axis"])
+    axR.tick_params(colors=C["mut"], labelsize=9)
+
+    n_all = l_proj.size
+    hit = float(((l_proj >= 0.3) & (l_proj <= 1.1)).mean() * 100)
+    fig.suptitle(f"5-seed z 投影消融（P1 补强）：薄片几何跨 opt_seed 稳定——"
+                 f"回弹命中判据带 {hit:.0f}%（{n_all}/{n_all} 点）",
+                 fontsize=12.5, color=C["ink"], y=1.00)
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    pOut = os.path.join(OUT, "figH_zablation_5seed.png")
+    fig.savefig(pOut, dpi=110)
+    plt.close(fig)
+    print(f"fig -> {pOut}")
+    print("DONE zab5 可视化")
+
 elif WHICH == "epsscan":
     sd = np.load(os.path.join(OUT, "mc_ext_epsscan.npz"), allow_pickle=False)
     epss = sd["eps_list"] * 100
