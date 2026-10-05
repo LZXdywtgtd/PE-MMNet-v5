@@ -1,0 +1,133 @@
+环境：msg-rewrite=7b31349 origin/msg-rewrite=7b31349；范围 8b85ab9..msg-rewrite 共 45 条（main 同范围 45 条）
+
+### 审计1: hash 引用全部 main 祖先
+命令: 对每条 message 提取 unique 7-9 位 hex，逐个 git merge-base --is-ancestor <h> main
+  29912fa  @pos[23] -> ancestor
+  429a050  @pos[8, 44] -> ancestor
+  42c9296  @pos[12, 12] -> ancestor
+  50fb408  @pos[7] -> ancestor
+  5245d2b  @pos[18, 18] -> ancestor
+  53dfa68  @pos[13] -> ancestor
+  54512fe  @pos[15] -> ancestor
+  60fbc34  @pos[20] -> ancestor
+  65a8362  @pos[19, 19] -> ancestor
+  73b1a99  @pos[16] -> ancestor
+  8856c10  @pos[25] -> ancestor
+  96e2ef0  @pos[16, 16, 17] -> ancestor
+  9c28ac3  @pos[2] -> ancestor
+  9d6e1aa  @pos[9] -> ancestor
+  9dabfae  @pos[4] -> ancestor
+  b21c5c1  @pos[43] -> ancestor
+  c28d99f  @pos[5, 5] -> ancestor
+  c548667  @pos[14] -> ancestor
+  ce8aab8  @pos[44, 44] -> ancestor
+  e5cf806  @pos[43] -> ancestor
+  f2155dd  @pos[21, 21] -> ancestor
+  f51554c  @pos[6] -> ancestor
+  小计: 22/22 ancestor
+
+### 审计2: 无前向引用（引用位置号 < 本条位置号）
+  FORWARD: 73b1a99@main-pos16 出现在分支 pos16
+  前向引用计数: 1
+
+### 审计3: [背景] 禁语 grep
+命令: grep -n "前一条|上一条|上一 commit|前一 commit"（分支 message + 源 .txt 双查）
+  命中: 分支 message 0 处，源 .txt 0 处
+  补充披露（弱变体，不在指定 grep 内，供人工判断）:
+  pos40 
+9ffccb: ε=10%/20% 反弹（0.829/0.742）。前条落档的解读"任意 20% 邻域
+  弱变体命中: 1 处
+
+### 审计4: 关键数字可溯源（message 与源文档双查）
+  PASS 7497150(分支
+a9c495) "7.05": message含=True; 源: CHANGELOG.md: - 判据 4 ratio **7.05→0.43 PASS**（阈值 1.5，v5-α 首次通过）
+  PASS 7497150(分支
+a9c495) "0.43": message含=True; 源: CHANGELOG.md: - 判据 4 ratio **7.05→0.43 PASS**（阈值 1.5，v5-α 首次通过）
+  FAIL 90a0ae8(分支
+60bdd3) "11/200": message含=False; 源: CHANGELOG.md: x_2d 逐位一致（都是 D' 图像）但 **GT 恰 11/200 不同**（=旧 L 形
+  PASS 0072353(分支
+768bfb) "0.1191": message含=True; 源: CHANGELOG.md: **inter_var=0.1191 PASS（阈 ≥1e-3，119 倍余量）**；
+  PASS 643d1fb(分支
+9ffccb) "0.2450": message含=True; 源: docs/mc_paper_readiness.md: - warm max=0.2450，是冷启动 0.8287 的 -70%——**反弹大部分是
+  PASS 643d1fb(分支
+9ffccb) "0.8287": message含=True; 源: docs/mc_paper_readiness.md: - warm max=0.2450，是冷启动 0.8287 的 -70%——**反弹大部分是
+  PASS b21c5c1(分支
+615c8b) "0.330": message含=True; 源: docs/mc_paper_readiness.md: 协议同 P3c。5 轮 max 0.843/0.279/0.307/0.325/0.330——**末轮
+
+### 审计5: 作废/推翻/撤回 交叉标注
+  pos1 22ef419: 仿真输出与历史不兼容，旧缓存作废）+ max_history_samples=600
+  pos1 22ef419: - 仿真器随机化导致新缓存与历史缓存不兼容，旧缓存全部作废需
+  pos11 
+12b577: 推翻。本实验在放行前做三道闸门，全部失败。
+  pos11 
+12b577: - 三选项待用户拍板：①fast 口径转正（推翻 V5-017）②路线 C
+  pos12 
+b82940: feat(v5): fast口径转正(V5-017推翻)+D'全量生成链路——V5-025诊断:默认曲线调制消失主因是热扩散
+  pos12 
+b82940: - 用户拍板 fast 转正（推翻 V5-017"fast 仅供冒烟"口径），定位
+  pos18 
+271569: 推翻修正：37.4 是双峰分布的均值（49% 样本 <10px + 42% 样本
+  pos19 
+cd629e: docs(v5-030): 第四轮复核——用户质疑A/B/C全部成立，推翻"结构上限+分辨率瓶颈"初版结论
+  pos19 
+cd629e: 逐条定量复核——三个质疑全部成立，初版结论推翻。
+  pos20 
+f4edb0: 60fbc34 推翻初版结论后遗留问题：42% 完全没学到的样本（>60px）
+  pos20 
+f4edb0: 将推翻本轮部分样本归因
+  pos21 
+bc805c: docs(v5-030): 第六轮收窄+失败模式四象限——80%方差未解释/32×32撤回/failed组0%纯顺序错
+  pos21 
+bc805c: - 收窄③："建议 32×32"撤回（数据证伪）：补测逐样本 oracle
+  pos21 
+bc805c: - 32×32 撤回依据为补测数据（90%<93% 逐样本），非推理
+  pos22 
+92389d: rot90 增广 bug 部分推翻）
+  pos24 
+d5c321: - 该轮全部结论后被 V5-031 rot90 增广 bug 修复作废：
+  pos25 
+f3b7bc: 本轮全部结论后被 V5-031 rot90 增广 bug 修复作废：
+  pos26 
+a9c495: - 作废: 位置回归头全局失败/向心收缩/两簇机制/顺序监督上界/79% 方差等五至九轮结论
+  pos31 
+318e00: docs(v5): V5-033 P0 根治落档——立项文档升 v3.2.1，§八.4 人工核验纪律作废
+  pos38 
+46a71a: 修正（反弹大部分是优化伪影，强宣称撤回）
+  pos39 
+f560a1: 伪影，该强宣称被撤回（本条落档的是升级动作本身，撤回见 P3b
+  pos40 
+9ffccb: fix(docs): P3b 控制实验修正 ε 扫描解读——撤回"20% 邻域不可连通"强宣称
+  pos40 
+9ffccb: 插值段"；初版"邻域内不可连通"明文标撤回）；§2 候选 c 措辞加
+  pos41 
+2bf1ea: P3b 撤回强宣称后遗留一问：残余的插值段擦台（曲线 max 仍 0.245，
+  含作废/推翻/撤回语句的行: 24 行
+
+### 审计6: 五段式完备性
+  完整四段([背景]+[实现/修改]+[验证]+[已知问题]): 32/45
+  不完整: pos26 
+a9c495 缺 ['背景', '实现/修改', '验证', '已知问题']
+  不完整: pos27 
+511447 缺 ['背景', '实现/修改', '验证', '已知问题']
+  不完整: pos28 
+552c94 缺 ['背景', '实现/修改', '验证', '已知问题']
+  不完整: pos29 
+8efba5 缺 ['背景', '实现/修改', '验证', '已知问题']
+  不完整: pos30 
+60bdd3 缺 ['背景', '实现/修改', '验证', '已知问题']
+  不完整: pos31 
+318e00 缺 ['背景', '实现/修改', '验证', '已知问题']
+  不完整: pos32 
+ff4597 缺 ['背景', '实现/修改', '验证', '已知问题']
+  不完整: pos33 
+1fa797 缺 ['背景', '实现/修改', '验证', '已知问题']
+  不完整: pos34 
+18791e 缺 ['背景', '实现/修改', '验证', '已知问题']
+  不完整: pos35 
+768bfb 缺 ['背景', '实现/修改', '验证', '已知问题']
+  不完整: pos36 
+c349c9 缺 ['背景', '实现/修改', '验证', '已知问题']
+  不完整: pos37 
+ba34cf 缺 ['背景', '实现/修改', '验证', '已知问题']
+  不完整: pos45 
+7b3134 缺 ['实现/修改']
